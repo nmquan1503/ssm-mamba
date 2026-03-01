@@ -1,9 +1,12 @@
 #pragma once
 
 #include <vector>
-#include <torch/extension.h>
 
-struct ScanParams {
+namespace at {
+    class Tensor;
+}
+
+struct SSScanParams {
     int batch_size, seq_len, num_chunks;
     int A_batch_stride;
     int B_batch_stride;
@@ -15,7 +18,7 @@ struct ScanParams {
     void* __restrict__ out_ptr;
 };
 
-struct BaseParams {
+struct BaseSSParams {
     int batch_size, seq_len, state_dim, num_channels;
 
     int num_chunks;
@@ -36,12 +39,12 @@ struct BaseParams {
     void* __restrict__ h_ptr;   // (batch_size, num_channels, num_chunks, state_dim * 2)
 };
 
-struct ForwardParams : BaseParams {
+struct ForwardSSParams : BaseSSParams {
     int out_batch_stride, out_channel_stride;
     void* __restrict__ out_ptr; // (batch_size, num_channels, seq_len)
 };
 
-struct BackwardParams : BaseParams {
+struct BackwardSSParams : BaseSSParams {
     int du_batch_stride, du_channel_stride;
     int dA_channel_stride;
     int dB_batch_stride, dB_state_stride;
@@ -77,5 +80,6 @@ std::vector<at::Tensor> selective_scan_backward(
     const at::Tensor& D,
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
+    const at::Tensor& h,
     const at::Tensor& dout
 );
