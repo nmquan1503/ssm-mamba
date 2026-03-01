@@ -14,19 +14,19 @@
 
 #define DISPATCH_SWITCH(VALUE, CONST_NAME, ...) \
     [&] {                                       \
-        if (VALUE < 16) {                       \
+        if (VALUE <= 16) {                      \
             constexpr int CONST_NAME = 16;      \
             __VA_ARGS__();                      \
         }                                       \
-        else if (VALUE < 32) {                  \
+        else if (VALUE <= 32) {                 \
             constexpr int CONST_NAME = 32;      \
             __VA_ARGS__();                      \
         }                                       \
-        else if (VALUE < 64) {                  \
+        else if (VALUE <= 64) {                 \
             constexpr int CONST_NAME = 64;      \
             __VA_ARGS__();                      \
         }                                       \
-        else if (VALUE < 128) {                 \
+        else if (VALUE <= 128) {                \
             constexpr int CONST_NAME = 128;     \
             __VA_ARGS__();                      \
         }                                       \
