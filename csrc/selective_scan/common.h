@@ -60,3 +60,28 @@ void store(
         typename Traits::ScalarBlockStore(smem).Store(dst, src, num_valid_elements);
     }
 }
+
+struct ScanOp {
+    __device__ __forceinline__
+    float2 operator()(const float2& ab0, const float2& ab1) const {
+        float a0 = ab0.x;
+        float b0 = ab0.y;
+        float a1 = ab1.x;
+        float b1 = ab1.y;
+        return make_float2(a1 * a0, a1 * b0 + b1);
+    }
+};
+
+struct StateCarryCallbackOp {
+    float2 carry;
+
+    explicit __device__
+    StateCarryCallbackOp(float2 init): carry(init) { }
+
+    __device__
+    float2 operator()(float2 aggregate) {
+        float2 old = carry;
+        carry = ScanOp()(carry, aggregate);
+        return old;
+    }
+};
