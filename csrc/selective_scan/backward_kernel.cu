@@ -3,19 +3,22 @@
 #include <cub/block/block_scan.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <c10/cuda/CUDAException.h>
+#include <ATen/cuda/Atomic.cuh>
 
 #include "kernel_config.h"
 #include "reverse_scan.cuh"
 #include "selective_scan.h"
 #include "common.h"
+#include "static_switch.h"
 
-template<bool kSeqDevisible_>
+template<bool kSeqDivisible_, int kMaxStateDim_>
 struct BackwardSSKernelTraits {
     static constexpr int kNumThreads = kernel_config::num_threads;
     static constexpr int kMinBlocks = (kNumThreads < 128) ? 5 : 3;
     static constexpr int kNumElements = kernel_config::num_elements;
     static constexpr int kNumVectors = kNumElements / 4;
     static constexpr bool kSeqDivisible = kSeqDivisible_;
+    static constexpr int kMaxStateDim = kMaxStateDim_;
     static constexpr bool kEnableDirectVectorIO = kSeqDivisible && (kNumVectors == 1);
 
     using ScalarBlockLoad = cub::BlockLoad<
@@ -65,13 +68,13 @@ struct BackwardSSKernelTraits {
     using BlockExchange = cub::BlockExchange<float, kNumThreads, kNumElements>;
 
     static constexpr int kSMemIOSizeInBytes = max_of({
-        sizeof(typename ScalarBlockLoad::TempStorage) * 2,
-        sizeof(typename VectorBlockLoad::TempStorage) * 2,
         sizeof(typename ScalarBlockLoad::TempStorage),
-        sizeof(typename VectorBlockLoad::TempStorage)
+        sizeof(typename VectorBlockLoad::TempStorage),
+        sizeof(typename ScalarBlockStore::TempStorage),
+        sizeof(typename VectorBlockStore::TempStorage)
     });
 
-    static constexpr int kSMemExchangeSizeInBytes = sizeof(typename BlockExchange::TempStorage) * 2;   // for both B and C
+    static constexpr int kSMemExchangeSizeInBytes = sizeof(typename BlockExchange::TempStorage);
 
     static constexpr int kSMemReduceSizeInBytes = sizeof(typename StateBlockReduce::TempStorage);
 
