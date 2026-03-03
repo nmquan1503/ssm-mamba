@@ -16,7 +16,7 @@ setup(
                 str(this_dir / "csrc" / "selective_scan" / "backward_kernel.cu"),
             ],
             include_dirs=[
-                str(this_dir / "csrc" / "selective_scan"),
+                str(this_dir / "csrc"),
             ],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
