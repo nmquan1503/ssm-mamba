@@ -25,6 +25,7 @@ struct SUParams {
     void* __restrict__ delta_ptr;   // (batch_size, num_channels)
     void* __restrict__ delta_bias_ptr;  // (num_channels)
     void* __restrict__ h_ptr;   // (batch_size, num_channels, state_dim)
+    void* __restrict__ new_h_ptr;   // (batch_size, num_channels, state_dim)
     void* __restrict__ out_ptr; // (batch_size, num_channels)
 };
 
