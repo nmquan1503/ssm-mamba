@@ -20,7 +20,7 @@ struct SSForwardKernelTraits {
     using ScalarBlockLoad = cub::BlockLoad<
         float, 
         kNumThreads, 
-        kMinBlocks,
+        kNumElements,
         cub::BLOCK_LOAD_WARP_TRANSPOSE
     >;
 
@@ -78,8 +78,8 @@ void forward_kernel(ForwardSSParams& params) {
         typename Traits::ScalarBlockLoad::TempStorage&
     >(smem_);
 
-    auto& smem_load_secondary = reinterpret_cast<
-        typename Traits::ScalarBlockLoad::TempStorage&
+    auto& smem_load_secondary = *reinterpret_cast<
+        typename Traits::ScalarBlockLoad::TempStorage*
     >(smem_ + sizeof(typename Traits::ScalarBlockLoad::TempStorage));
 
     auto& smem_store = reinterpret_cast<

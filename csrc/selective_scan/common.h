@@ -30,7 +30,7 @@ void load(
         );
     }
     else {
-        typename Traits::ScalarBlockLoad(smem).Load(src, dst, num_valid_elements 0.f);
+        typename Traits::ScalarBlockLoad(smem).Load(src, dst, num_valid_elements, 0.f);
     }
 }
 
@@ -57,7 +57,7 @@ void store(
         );
     }
     else {
-        typename Traits::ScalarBlockStore(smem).Store(dst, src, num_valid_elements);
+        typename Traits::ScalarBlockStore(smem).Store(dst, vals, num_valid_elements);
     }
 }
 

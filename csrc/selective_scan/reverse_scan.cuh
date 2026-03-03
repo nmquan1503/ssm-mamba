@@ -235,7 +235,7 @@ struct BlockReverseScan {
             block_postfix = warp_scan.Broadcast(block_postfix, 0);
 
             // Merge block-level postfix into local results
-            exclusive_aggregate = linear_tid == BLOCK_TRHEADS - 1
+            exclusive_aggregate = linear_tid == BLOCK_THREADS - 1
                 ? block_postfix
                 : scan_op(block_postfix, exclusive_aggregate);
         }

@@ -24,7 +24,7 @@ struct BackwardSSKernelTraits {
     using ScalarBlockLoad = cub::BlockLoad<
         float, 
         kNumThreads, 
-        kMinBlocks,
+        kNumElements,
         cub::BLOCK_LOAD_WARP_TRANSPOSE
     >;
 
