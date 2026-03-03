@@ -17,7 +17,9 @@ struct SUKernelTraits {
 template<typename Traits>
 __global__ __launch_bounds__(Traits::kNumThreads, Traits::kMinBlocks)
 void kernel(SUParams& params) {
-    extern __shared__ typename Traits::BlockReduce::TempStorage smem_reduce;
+    extern __shared__ char smem_[];
+
+    auto& smem_reduce = *reinterpret_cast<typename Traits::BlockReduce::TempStorage*>(smem_);
 
     const int batch_id = blockIdx.x;
     const int channel_id = blockIdx.y;
@@ -44,7 +46,7 @@ void kernel(SUParams& params) {
     float C_val = state_id < params.state_dim
         ? C[batch_id * params.C_batch_stride + state_id]
         : 0.f;
-    float D_val = state_id == 0 : D[channel_id] ? 0.f;
+    float D_val = state_id == 0 ? D[channel_id] : 0.f;
     float delta_raw_val = delta[batch_id * params.delta_batch_stride + channel_id];
     float delta_bias_val = delta_bias[channel_id];
     float h_val = state_id < params.state_dim
