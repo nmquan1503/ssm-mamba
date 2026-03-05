@@ -61,7 +61,7 @@ class Mamba(nn.Module):
     
         delta = torch.exp(
             torch.rand(self.inner_dim, device=device, dtype=torch.float32)
-            + math.log(delta_max) - math.log(delta_min)
+            * (math.log(delta_max) - math.log(delta_min))
             + math.log(delta_min)
         ).clamp(min=delta_init_floor)
         inv_delta = delta + torch.log(-torch.expm1(-delta))
