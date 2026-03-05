@@ -61,5 +61,10 @@ class SelectiveScanFn(torch.autograd.Function):
         
         dout = ensure_contiguous(dout)
         u, A, B, C, D, delta, delta_bias, h = ctx.saved_tensors
-        du, dA, dB, dC, dD, ddelta,ddelta_bias = selective_scan.backward(u, A, B, C, D, delta, delta_bias, h)
+        du, dA, dB, dC, dD, ddelta,ddelta_bias = selective_scan.backward(
+            u, 
+            A, B, C, D, 
+            delta, delta_bias, 
+            h, dout
+        )
         return du, dA, dB, dC, dD, ddelta, ddelta_bias, None

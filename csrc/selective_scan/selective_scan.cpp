@@ -63,7 +63,7 @@ void set_base_params(
     params.C_ptr = C.data_ptr();
     params.D_ptr = D_ptr;
     params.delta_ptr = delta.data_ptr();
-    params.delta_bias_ptr;
+    params.delta_bias_ptr = delta_bias_ptr;
     params.h_ptr = h_ptr;
 
     params.u_batch_stride = u.stride(0);
@@ -144,8 +144,8 @@ void set_backward_params(
 
     params.du_ptr = du.data_ptr();
     params.dA_ptr = dA.data_ptr();
-    params.dA_ptr = dB.data_ptr();
-    params.dA_ptr = dC.data_ptr();
+    params.dB_ptr = dB.data_ptr();
+    params.dC_ptr = dC.data_ptr();
     params.dD_ptr = dD_ptr;
     params.ddelta_ptr = ddelta.data_ptr();
     params.ddelta_bias_ptr = ddelta_bias_ptr;
@@ -245,7 +245,7 @@ std::vector<at::Tensor> selective_scan_backward(
     CHECK_DIM(delta, 3);
     CHECK_DIM(delta_bias, 1);
     CHECK_DIM(h, 4);
-    CHECK_DIM(dout, 3)
+    CHECK_DIM(dout, 3);
 
     const auto sizes = u.sizes();
     const int batch_size = sizes[0];

@@ -86,7 +86,7 @@ struct BackwardSSKernelTraits {
 
 template<typename Traits>
 __global__ __launch_bounds__(Traits::kNumThreads, Traits::kMinBlocks)
-void backward_kernel(BackwardSSParams& params) {
+void backward_kernel(BackwardSSParams params) {
     constexpr int kNumThreads = Traits::kNumThreads;
     constexpr int kNumElements = Traits::kNumElements;
     constexpr int kMaxStateDim = Traits::kMaxStateDim;
@@ -129,7 +129,7 @@ void backward_kernel(BackwardSSParams& params) {
     
     float* u = reinterpret_cast<float*>(params.u_ptr)
         + batch_id * params.u_batch_stride
-        + channel_id + params.u_channel_stride
+        + channel_id * params.u_channel_stride
         + (params.num_chunks - 1) * kChunkSize;
 
     float* A = reinterpret_cast<float*>(params.A_ptr)

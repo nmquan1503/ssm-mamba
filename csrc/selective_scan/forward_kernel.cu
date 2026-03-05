@@ -67,7 +67,7 @@ struct SSForwardKernelTraits {
 
 template<typename Traits>
 __global__ __launch_bounds__(Traits::kNumThreads, Traits::kMinBlocks)
-void forward_kernel(ForwardSSParams& params) {
+void forward_kernel(ForwardSSParams params) {
     constexpr int kNumThreads = Traits::kNumThreads;
     constexpr int kNumElements = Traits::kNumElements;
     constexpr int kEnableDirectVectorIO = Traits::kEnableDirectVectorIO;
@@ -97,7 +97,7 @@ void forward_kernel(ForwardSSParams& params) {
     
     float* u = reinterpret_cast<float*>(params.u_ptr)
         + batch_id * params.u_batch_stride
-        + channel_id + params.u_channel_stride;
+        + channel_id * params.u_channel_stride;
 
     float* A = reinterpret_cast<float*>(params.A_ptr)
         + channel_id * params.A_channel_stride;

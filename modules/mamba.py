@@ -96,6 +96,9 @@ class Mamba(nn.Module):
             dim=1
         )
 
+        # (batch_size, seq_len, inner_dim)
+        gate_logis = gate_logis.permute(0, 2, 1).contiguous()
+
         if use_cache:
             # Cache conv hidden
             cache_size = self.conv_kernel - 1
