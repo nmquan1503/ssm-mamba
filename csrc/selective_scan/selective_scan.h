@@ -41,7 +41,11 @@ struct BaseSSParams {
 
 struct ForwardSSParams : BaseSSParams {
     int out_batch_stride, out_channel_stride;
+    int last_h_batch_stride, last_h_channel_stride;
+
     void* __restrict__ out_ptr; // (batch_size, num_channels, seq_len)
+    void* __restrict__ length_ptr; // (batch_size,)
+    void* __restrict__ last_h_ptr;  // (batch_size, num_channels, state_dim)
 };
 
 struct BackwardSSParams : BaseSSParams {
@@ -69,7 +73,8 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& C,
     const at::Tensor& D,
     const at::Tensor& delta,
-    const at::Tensor& delta_bias
+    const at::Tensor& delta_bias,
+    const at::Tensor& length
 );
 
 std::vector<at::Tensor> selective_scan_backward(

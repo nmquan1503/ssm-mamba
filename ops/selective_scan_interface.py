@@ -15,6 +15,7 @@ class SelectiveScanFn(torch.autograd.Function):
         D: torch.Tensor, 
         delta: torch.Tensor, 
         delta_bias: torch.Tensor, 
+        length: torch.Tensor | None = None,
         return_last_hidden: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
@@ -26,6 +27,7 @@ class SelectiveScanFn(torch.autograd.Function):
             D: (num_channels,)
             delta: (batch_size, num_channels, seq_len)
             delta_bias: (num_channels,)
+            length: (batch_size,)
         
         Returns:
             If return_last_hidden is True:
@@ -43,14 +45,17 @@ class SelectiveScanFn(torch.autograd.Function):
         D = ensure_contiguous(D)
         delta = ensure_contiguous(delta)
         delta_bias = ensure_contiguous(delta_bias)
+        if length is None:
+            batch_size, _, seq_len = u.shape
+            length = torch.full((batch_size,), seq_len, device=u.device, dtype=torch.long)
 
-        out, h = selective_scan.forward(u, A, B, C, D, delta, delta_bias)
+        out, h, last_h = selective_scan.forward(u, A, B, C, D, delta, delta_bias, length)
 
         if any(ctx.needs_input_grad[:7]):
             ctx.save_for_backward(u, A, B, C, D, delta, delta_bias, h)
         
         if return_last_hidden:
-            return out, h[:, :, -1, 1::2]
+            return out, last_h
         
         return out
 
@@ -67,4 +72,4 @@ class SelectiveScanFn(torch.autograd.Function):
             delta, delta_bias, 
             h, dout
         )
-        return du, dA, dB, dC, dD, ddelta, ddelta_bias, None
+        return du, dA, dB, dC, dD, ddelta, ddelta_bias, None, None

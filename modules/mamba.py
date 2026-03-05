@@ -152,7 +152,8 @@ class Mamba(nn.Module):
         scan_outputs = SelectiveScanFn.apply(
             hidden_states, 
             A, B, C, self.D, 
-            delta, self.delta_proj.bias, 
+            delta, self.delta_proj.bias,
+            lengths,
             lengths is not None
         );
 

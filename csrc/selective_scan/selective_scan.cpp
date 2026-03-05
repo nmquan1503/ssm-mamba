@@ -96,7 +96,9 @@ void set_forward_params(
     const at::Tensor delta,
     void* delta_bias_ptr,
     void* h_ptr,
-    const at::Tensor out
+    const at::Tensor out,
+    void* length_ptr,
+    const at::Tensor last_h
 ) {
     set_base_params(
         params, 
@@ -106,9 +108,14 @@ void set_forward_params(
     );
 
     params.out_ptr = out.data_ptr();
+    params.length_ptr = length_ptr;
+    params.last_h_ptr = last_h.data_ptr();
 
     params.out_batch_stride = out.stride(0);
     params.out_channel_stride = out.stride(1);
+
+    params.last_h_batch_stride = last_h.stride(0);
+    params.last_h_channel_stride = last_h.stride(0);
 }
 
 void set_backward_params(
@@ -176,7 +183,8 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& C,
     const at::Tensor& D,
     const at::Tensor& delta,
-    const at::Tensor& delta_bias
+    const at::Tensor& delta_bias,
+    const at::Tensor& length
 ) {
     CHECK_DIM(u, 3);
     CHECK_DIM(A, 2);
@@ -185,6 +193,7 @@ std::vector<at::Tensor> selective_scan_forward(
     CHECK_DIM(D, 1);
     CHECK_DIM(delta, 3);
     CHECK_DIM(delta_bias, 1);
+    CHECK_DIM(length, 1);
 
     const auto sizes = u.sizes();
     const int batch_size = sizes[0];
@@ -202,10 +211,15 @@ std::vector<at::Tensor> selective_scan_forward(
     CHECK(D, num_channels);
     CHECK(delta, batch_size, num_channels, seq_len);
     CHECK(delta_bias, num_channels);
+    CHECK(length, batch_size);
 
     at::Tensor out = at::empty_like(u);
     at::Tensor h = at::empty(
         {batch_size, num_channels, num_chunks, state_dim * 2},
+        u.options()
+    );
+    at::Tensor last_h = at::empty(
+        {batch_size, num_channels, state_dim},
         u.options()
     );
 
@@ -215,13 +229,13 @@ std::vector<at::Tensor> selective_scan_forward(
         batch_size, seq_len, state_dim, num_channels, num_chunks,
         u, A, B, C, D.data_ptr(),
         delta, delta_bias.data_ptr(),
-        h.data_ptr(), out
+        h.data_ptr(), out, length.data_ptr(), last_h
     );
 
     at::cuda::CUDAGuard device_guard(u.device());
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     forward_kernel_launch(params, stream);
-    std::vector<at::Tensor> result = {out, h};
+    std::vector<at::Tensor> result = {out, h, last_h};
     
     return result;
 }

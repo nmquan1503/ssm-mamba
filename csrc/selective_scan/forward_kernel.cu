@@ -118,6 +118,12 @@ void forward_kernel(ForwardSSParams params) {
     float* out = reinterpret_cast<float*>(params.out_ptr)
         + batch_id * params.out_batch_stride
         + channel_id * params.out_channel_stride;
+    
+    int last_idx = (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id] - 1;
+
+    float* last_h = reinterpret_cast<float*>(params.last_h_ptr)
+        + batch_id * params.last_h_batch_stride
+        + channel_id * params.last_h_channel_stride;
 
     constexpr int kChunkSize = kernel_config::chunk_size;
 
@@ -150,7 +156,7 @@ void forward_kernel(ForwardSSParams params) {
         }
 
         __syncthreads();
-        
+        int last_token_local_idx = last_idx - chunk_id * kChunkSize - threadIdx.x * kNumElements;
         for (int state_id = 0; state_id < params.state_dim; state_id++) {
             //  exp(x) = 2 ^ (x * log2(e))
             float A_val = A[state_id] * M_LOG2E;
@@ -211,6 +217,10 @@ void forward_kernel(ForwardSSParams params) {
             #pragma unroll
             for (int i = 0; i < kNumElements; i++) {
                 out_vals[i] += h_vals[i].y * C_vals[i];
+            }
+
+            if (last_token_local_idx >= 0 && last_token_local_idx < kNumElements) {
+                last_h[state_id] = h_vals[last_token_local_idx].y;
             }
         }
         
