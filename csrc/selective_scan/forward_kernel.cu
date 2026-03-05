@@ -56,8 +56,8 @@ struct SSForwardKernelTraits {
     >;
 
     static constexpr int kSMemIOSizeInBytes = max_of({
-        sizeof(typename ScalarBlockLoad::TempStorage) * 2, // for both B and C
-        sizeof(typename VectorBlockLoad::TempStorage) * 2, // for both B and C
+        sizeof(typename ScalarBlockLoad::TempStorage),
+        sizeof(typename VectorBlockLoad::TempStorage),
         sizeof(typename ScalarBlockStore::TempStorage),
         sizeof(typename VectorBlockStore::TempStorage)
     });
@@ -74,13 +74,9 @@ void forward_kernel(ForwardSSParams params) {
 
     extern __shared__ char smem_[];
 
-    auto& smem_load_primary = reinterpret_cast<
+    auto& smem_load = reinterpret_cast<
         typename Traits::ScalarBlockLoad::TempStorage&
     >(smem_);
-
-    auto& smem_load_secondary = *reinterpret_cast<
-        typename Traits::ScalarBlockLoad::TempStorage*
-    >(smem_ + sizeof(typename Traits::ScalarBlockLoad::TempStorage));
 
     auto& smem_store = reinterpret_cast<
         typename Traits::ScalarBlockStore::TempStorage&
@@ -128,12 +124,12 @@ void forward_kernel(ForwardSSParams params) {
     for (int chunk_id = 0; chunk_id < params.num_chunks; chunk_id++) {
         float u_vals[kNumElements], delta_raw_vals[kNumElements];
         __syncthreads();
-        load<Traits>(u, u_vals, smem_load_primary, params.seq_len - chunk_id * kChunkSize);
+        load<Traits>(u, u_vals, smem_load, params.seq_len - chunk_id * kChunkSize);
         if constexpr (!kEnableDirectVectorIO) {
             // Needed when using shared memory staging
             __syncthreads();
         }
-        load<Traits>(delta, delta_raw_vals, smem_load_primary, params.seq_len - chunk_id * kChunkSize);
+        load<Traits>(delta, delta_raw_vals, smem_load, params.seq_len - chunk_id * kChunkSize);
         
         u += kChunkSize;
         delta += kChunkSize;
@@ -162,13 +158,14 @@ void forward_kernel(ForwardSSParams params) {
             load<Traits>(
                 B + state_id * params.B_state_stride, 
                 B_vals, 
-                smem_load_primary, 
+                smem_load, 
                 params.seq_len - chunk_id * kChunkSize
             );
+            __syncthreads();
             load<Traits>(
                 C + state_id * params.C_state_stride, 
                 C_vals, 
-                smem_load_secondary, 
+                smem_load, 
                 params.seq_len - chunk_id * kChunkSize
             );
 
