@@ -211,7 +211,10 @@ std::vector<at::Tensor> selective_scan_forward(
     CHECK(D, num_channels);
     CHECK(delta, batch_size, num_channels, seq_len);
     CHECK(delta_bias, num_channels);
-    CHECK(length, batch_size);
+    TORCH_CHECK(length.is_cuda(),"length must be a CUDA tensor");
+    TORCH_CHECK(length.scalar_type() == at::kLong, "length must be long tensor");
+    TORCH_CHECK(length.is_contiguous(),"length must be contiguous");
+    TORCH_CHECK(length.size(0) == batch_size, "length must have shape (batch_size,)");
 
     at::Tensor out = at::empty_like(u);
     at::Tensor h = at::empty(
