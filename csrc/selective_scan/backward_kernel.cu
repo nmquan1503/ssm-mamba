@@ -157,7 +157,7 @@ void backward_kernel(BackwardSSParams params) {
 
     float* du = reinterpret_cast<float*>(params.du_ptr) 
         + batch_id * params.du_batch_stride
-        + channel_id + params.du_channel_stride
+        + channel_id * params.du_channel_stride
         + (params.num_chunks - 1) * kChunkSize;
 
     float* dA = reinterpret_cast<float*>(params.dA_ptr)
