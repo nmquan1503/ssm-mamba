@@ -114,7 +114,7 @@ class Mamba(nn.Module):
                 index=clamped_indices
             )
             valid_mask = valid_mask.unsqueeze(1).expand(-1, self.inner_dim, -1)
-            conv_context *= valid_mask
+            conv_context = conv_context * valid_mask
             self._conv_context = conv_context.detach()
 
         hidden_states = self.conv(hidden_states)[..., :seq_len]
@@ -165,7 +165,7 @@ class Mamba(nn.Module):
         
         # (batch_size, seq_len, inner_dim)
         hidden_states = hidden_states.permute(0, 2, 1).contiguous()
-        hidden_states *= F.silu(gate_logis)
+        hidden_states = hidden_states * F.silu(gate_logis)
 
         # (batch_size, seq_len, model_dim)
         hidden_states = self.out_proj(hidden_states)
@@ -195,7 +195,7 @@ class Mamba(nn.Module):
         # (batch_size, inner_dim)
         hidden_states = (conv_context * conv_weight.unsqueeze(0)).sum(dim=-1)
         if self.conv_bias:
-            hidden_states += self.conv.bias
+            hidden_states = hidden_states + self.conv.bias
         hidden_states = F.silu(hidden_states)
 
         # delta: (batch_size, delta_rank)
