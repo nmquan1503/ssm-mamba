@@ -16,7 +16,7 @@ struct SUKernelTraits {
 
 template<typename Traits>
 __global__ __launch_bounds__(Traits::kNumThreads, Traits::kMinBlocks)
-void kernel(SUParams& params) {
+void kernel(SUParams params) {
     extern __shared__ char smem_[];
 
     auto& smem_reduce = *reinterpret_cast<typename Traits::BlockReduce::TempStorage*>(smem_);
@@ -54,6 +54,7 @@ void kernel(SUParams& params) {
         : 0.f;
 
     float delta_val = delta_raw_val + delta_bias_val;
+    delta_val = delta_val <= 20.f ? log1pf(expf(delta_val)) : delta_val;
     float new_h_val = state_id < params.state_dim
         ? exp2f(delta_val * A_val * M_LOG2E) * h_val + delta_val * u_val * B_val
         : 0.f;
