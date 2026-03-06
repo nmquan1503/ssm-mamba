@@ -115,7 +115,7 @@ void set_forward_params(
     params.out_channel_stride = out.stride(1);
 
     params.last_h_batch_stride = last_h.stride(0);
-    params.last_h_channel_stride = last_h.stride(0);
+    params.last_h_channel_stride = last_h.stride(1);
 }
 
 void set_backward_params(

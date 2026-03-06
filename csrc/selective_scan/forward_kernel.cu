@@ -155,12 +155,12 @@ void forward_kernel(ForwardSSParams params) {
             out_vals[i] = D_val * u_vals[i];
         }
 
-        __syncthreads();
         int last_token_local_idx = last_idx - chunk_id * kChunkSize - threadIdx.x * kNumElements;
         for (int state_id = 0; state_id < params.state_dim; state_id++) {
             //  exp(x) = 2 ^ (x * log2(e))
             float A_val = A[state_id] * M_LOG2E;
             float B_vals[kNumElements], C_vals[kNumElements];
+            __syncthreads();
             load<Traits>(
                 B + state_id * params.B_state_stride, 
                 B_vals, 
