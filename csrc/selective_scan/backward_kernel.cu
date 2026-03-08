@@ -203,7 +203,9 @@ void backward_kernel(BackwardSSParams params) {
         + batch_id * params.dh_last_batch_stride
         + channel_id * params.dh_last_channel_stride;
     
-    int length = (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id];
+    int length = params.length_ptr != nullptr
+        ? (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id]
+        : params.seq_len;
 
     for (int chunk_id = params.num_chunks - 1; chunk_id >= 0; chunk_id--) {
         int chunk_start_idx = chunk_id * kChunkSize;

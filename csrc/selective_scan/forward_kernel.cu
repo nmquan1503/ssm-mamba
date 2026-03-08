@@ -125,7 +125,9 @@ void forward_kernel(ForwardSSParams params) {
         + batch_id * params.out_batch_stride
         + channel_id * params.out_channel_stride;
     
-    int length = (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id];
+    int length = params.length_ptr != nullptr
+        ? (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id]
+        : params.seq_len;
 
     constexpr int kChunkSize = kernel_config::chunk_size;
 

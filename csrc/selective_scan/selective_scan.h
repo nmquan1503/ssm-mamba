@@ -78,7 +78,7 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
     const std::optional<at::Tensor>& h_init_,
-    const at::Tensor& length
+    const std::optional<at::Tensor>& length_
 );
 
 std::vector<at::Tensor> selective_scan_backward(
@@ -93,5 +93,5 @@ std::vector<at::Tensor> selective_scan_backward(
     const std::optional<at::Tensor>& h_init_,
     const at::Tensor& dout,
     const at::Tensor& dh_last,
-    const at::Tensor& length
+    const std::optional<at::Tensor>& length_
 );

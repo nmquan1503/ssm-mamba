@@ -214,10 +214,12 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
     const std::optional<at::Tensor>& h_init_,
-    const at::Tensor& length
+    const std::optional<at::Tensor>& length_
 ) {
     const bool has_h_init = h_init_.has_value();
+    const bool has_length = length_.has_value();
     const at::Tensor h_init = has_h_init ? h_init_.value() : at::Tensor();
+    const at::Tensor length = has_length ? length_.value() : at::Tensor();
 
     CHECK_DIM(u, 3);
     CHECK_DIM(A, 2);
@@ -229,7 +231,9 @@ std::vector<at::Tensor> selective_scan_forward(
     if (has_h_init) {
         CHECK_DIM(h_init, 3);
     }
-    CHECK_DIM(length, 1);
+    if (has_length) {
+        CHECK_DIM(length, 1);
+    }
 
     const auto sizes = u.sizes();
     const int batch_size = sizes[0];
@@ -250,10 +254,12 @@ std::vector<at::Tensor> selective_scan_forward(
     if (has_h_init) {
         CHECK(h_init, batch_size, num_channels, state_dim);
     }
-    TORCH_CHECK(length.is_cuda(),"length must be a CUDA tensor");
-    TORCH_CHECK(length.scalar_type() == at::kLong, "length must be long tensor");
-    TORCH_CHECK(length.is_contiguous(),"length must be contiguous");
-    TORCH_CHECK(length.size(0) == batch_size, "length must have shape (batch_size,)");
+    if  (has_length) {
+        TORCH_CHECK(length.is_cuda(),"length must be a CUDA tensor");
+        TORCH_CHECK(length.scalar_type() == at::kLong, "length must be long tensor");
+        TORCH_CHECK(length.is_contiguous(),"length must be contiguous");
+        TORCH_CHECK(length.size(0) == batch_size, "length must have shape (batch_size,)");
+    }
 
     at::Tensor out = at::empty_like(u);
     at::Tensor h = at::empty(
@@ -268,7 +274,7 @@ std::vector<at::Tensor> selective_scan_forward(
         has_h_init, num_chunks,
         u, A, B, C, D.data_ptr(),
         delta, delta_bias.data_ptr(),
-        h, h_init, out, length.data_ptr()
+        h, h_init, out, has_length ? length.data_ptr() : nullptr
     );
 
     at::cuda::CUDAGuard device_guard(u.device());
@@ -291,10 +297,12 @@ std::vector<at::Tensor> selective_scan_backward(
     const std::optional<at::Tensor>& h_init_,
     const at::Tensor& dout,
     const at::Tensor& dh_last,
-    const at::Tensor& length
+    const std::optional<at::Tensor>& length_
 ) {
     const bool has_h_init = h_init_.has_value();
+    const bool has_length = length_.has_value();
     const at::Tensor h_init = has_h_init ? h_init_.value() : at::Tensor();
+    const at::Tensor length = has_length ? length_.value() : at::Tensor();
 
     CHECK_DIM(u, 3);
     CHECK_DIM(A, 2);
@@ -308,7 +316,9 @@ std::vector<at::Tensor> selective_scan_backward(
         CHECK_DIM(h_init, 3);
     }
     CHECK_DIM(dout, 3);
-    CHECK_DIM(length, 1);
+    if (has_length) {
+        CHECK_DIM(length, 1);
+    }
 
     const auto sizes = u.sizes();
     const int batch_size = sizes[0];
@@ -350,7 +360,7 @@ std::vector<at::Tensor> selective_scan_backward(
         delta, delta_bias.data_ptr(), h, h_init,
         du, dA, dB, dC, dD.data_ptr(),
         ddelta, ddelta_bias.data_ptr(), dh_init, 
-        dout, dh_last, length.data_ptr()
+        dout, dh_last, has_length ? length.data_ptr() : nullptr
     );
 
     at::cuda::CUDAGuard device_guard(u.device());
