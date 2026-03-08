@@ -1,10 +1,8 @@
 #pragma once
 
 #include <vector>
-
-namespace at {
-    class Tensor;
-}
+#include <optional>
+#include <ATen/Tensor.h>
 
 struct SSScanParams {
     int batch_size, seq_len, num_chunks;
@@ -20,7 +18,7 @@ struct SSScanParams {
 
 struct BaseSSParams {
     int batch_size, seq_len, state_dim, num_channels;
-
+    bool has_h_init;
     int num_chunks;
     
     int u_batch_stride, u_channel_stride;
@@ -28,6 +26,8 @@ struct BaseSSParams {
     int B_batch_stride, B_state_stride;
     int C_batch_stride, C_state_stride;
     int delta_batch_stride, delta_channel_stride;
+    int h_batch_stride, h_channel_stride, h_chunk_stride;
+    int h_init_batch_stride, h_init_channel_stride;
 
     void* __restrict__ u_ptr;   // (batch_size, num_channels, seq_len)
     void* __restrict__ A_ptr;   // (num_channels, state_dim)
@@ -37,15 +37,14 @@ struct BaseSSParams {
     void* __restrict__ delta_ptr;   // (batch_size, num_channels, seq_len)
     void* __restrict__ delta_bias_ptr;  // (num_channels,)
     void* __restrict__ h_ptr;   // (batch_size, num_channels, num_chunks, state_dim * 2)
+    void* __restrict__ h_init_ptr;  // (batch_size, num_channels, state_dim)
+    void* __restrict__ length_ptr; // (batch_size,)
 };
 
 struct ForwardSSParams : BaseSSParams {
     int out_batch_stride, out_channel_stride;
-    int last_h_batch_stride, last_h_channel_stride;
 
     void* __restrict__ out_ptr; // (batch_size, num_channels, seq_len)
-    void* __restrict__ length_ptr; // (batch_size,)
-    void* __restrict__ last_h_ptr;  // (batch_size, num_channels, state_dim)
 };
 
 struct BackwardSSParams : BaseSSParams {
@@ -54,7 +53,9 @@ struct BackwardSSParams : BaseSSParams {
     int dB_batch_stride, dB_state_stride;
     int dC_batch_stride, dC_state_stride;
     int ddelta_batch_stride, ddelta_channel_stride;
+    int dh_init_batch_stride, dh_init_channel_stride;
     int dout_batch_stride, dout_channel_stride;
+    int dh_last_batch_stride, dh_last_channel_stride;
 
     void* __restrict__ du_ptr;  // (batch_size, num_channels, seq_len)
     void* __restrict__ dA_ptr;  // (num_channels, state_dim)
@@ -63,7 +64,9 @@ struct BackwardSSParams : BaseSSParams {
     void* __restrict__ dD_ptr;  // (num_channels,)
     void* __restrict__ ddelta_ptr;  // (batch_size, num_channels, seq_len)
     void* __restrict__ ddelta_bias_ptr; // (num_channels,)
+    void* __restrict__ dh_init_ptr; // (batch_size, num_channels, state_dim)
     void* __restrict__ dout_ptr;    // (batch_size, num_channels, seq_len)
+    void* __restrict__ dh_last_ptr; // (batch_size, num_channels, state_dim)
 };
 
 std::vector<at::Tensor> selective_scan_forward(
@@ -74,6 +77,7 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& D,
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
+    const std::optional<at::Tensor>& h_init_,
     const at::Tensor& length
 );
 
@@ -86,5 +90,8 @@ std::vector<at::Tensor> selective_scan_backward(
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
     const at::Tensor& h,
-    const at::Tensor& dout
+    const std::optional<at::Tensor>& h_init_,
+    const at::Tensor& dout,
+    const at::Tensor& dh_last,
+    const at::Tensor& length
 );

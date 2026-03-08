@@ -70,7 +70,7 @@ __global__ __launch_bounds__(Traits::kNumThreads, Traits::kMinBlocks)
 void forward_kernel(ForwardSSParams params) {
     constexpr int kNumThreads = Traits::kNumThreads;
     constexpr int kNumElements = Traits::kNumElements;
-    constexpr int kEnableDirectVectorIO = Traits::kEnableDirectVectorIO;
+    constexpr bool kEnableDirectVectorIO = Traits::kEnableDirectVectorIO;
 
     extern __shared__ char smem_[];
 
@@ -115,15 +115,17 @@ void forward_kernel(ForwardSSParams params) {
     float2* h = reinterpret_cast<float2*>(params.h_ptr)
         + (batch_id * params.num_channels + channel_id) * params.num_chunks * params.state_dim;
 
+    float* h_init = params.h_init_ptr == nullptr
+        ? nullptr
+        : reinterpret_cast<float*>(params.h_init_ptr)
+            + batch_id * params.h_init_batch_stride
+            + channel_id * params.h_init_channel_stride;
+
     float* out = reinterpret_cast<float*>(params.out_ptr)
         + batch_id * params.out_batch_stride
         + channel_id * params.out_channel_stride;
     
-    int last_idx = (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id] - 1;
-
-    float* last_h = reinterpret_cast<float*>(params.last_h_ptr)
-        + batch_id * params.last_h_batch_stride
-        + channel_id * params.last_h_channel_stride;
+    int length = (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id];
 
     constexpr int kChunkSize = kernel_config::chunk_size;
 
@@ -155,7 +157,6 @@ void forward_kernel(ForwardSSParams params) {
             out_vals[i] = D_val * u_vals[i];
         }
 
-        int last_token_local_idx = last_idx - chunk_id * kChunkSize - threadIdx.x * kNumElements;
         for (int state_id = 0; state_id < params.state_dim; state_id++) {
             //  exp(x) = 2 ^ (x * log2(e))
             float A_val = A[state_id] * M_LOG2E;
@@ -181,24 +182,26 @@ void forward_kernel(ForwardSSParams params) {
             // Recurrence:
             // h_t = A_t * h_{t-1} + B_t
             float2 h_vals[kNumElements];
-
+            int base_token_idx = chunk_id * kChunkSize + threadIdx.x * kNumElements;
             #pragma unroll
             for (int i = 0; i < kNumElements; i++) {
                 h_vals[i] = make_float2(
                     exp2f(delta_vals[i] * A_val),
                     delta_u_vals[i] * B_vals[i]
                 );
-                if constexpr (!Traits::kSeqDivisible) {
-                    if (threadIdx.x * kNumElements + i >= params.seq_len - chunk_id * kChunkSize) {
-                        h_vals[i] = make_float2(1.f, 0.f);
-                    }
+                if (base_token_idx + i >= length) {
+                    h_vals[i] = make_float2(1.f, 0.f);
                 }
             }
-
+            
+            float h_init_val = h_init == nullptr ? 0.f : h_init[state_id];
             float2 running_prefix;
-            running_prefix = chunk_id > 0 && threadIdx.x % 32 == 0
-                ? smem_running_prefix[state_id]
-                : make_float2(1.f, 0.f);
+            running_prefix = threadIdx.x % 32 != 0
+                ? make_float2(1.f, 0.f)
+                : (chunk_id == 0
+                    ? make_float2(1.f, h_init_val)
+                    : smem_running_prefix[state_id]
+                );
             
             StateCarryCallbackOp prefix_callback(running_prefix);
             // Inclusive scan with operator:
@@ -217,10 +220,6 @@ void forward_kernel(ForwardSSParams params) {
             #pragma unroll
             for (int i = 0; i < kNumElements; i++) {
                 out_vals[i] += h_vals[i].y * C_vals[i];
-            }
-
-            if (last_token_local_idx >= 0 && last_token_local_idx < kNumElements) {
-                last_h[state_id] = h_vals[last_token_local_idx].y;
             }
         }
         

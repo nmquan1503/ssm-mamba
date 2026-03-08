@@ -155,6 +155,12 @@ void backward_kernel(BackwardSSParams params) {
     float2* h = reinterpret_cast<float2*>(params.h_ptr)
         + (batch_id * params.num_channels + channel_id) * params.num_chunks * params.state_dim;
 
+    float* h_init = params.h_init_ptr == nullptr
+        ? nullptr
+        : reinterpret_cast<float*>(params.h_init_ptr)
+            + batch_id * params.h_init_batch_stride
+            + channel_id * params.h_init_channel_stride;
+
     float* du = reinterpret_cast<float*>(params.du_ptr) 
         + batch_id * params.du_batch_stride
         + channel_id * params.du_channel_stride
@@ -182,12 +188,27 @@ void backward_kernel(BackwardSSParams params) {
     float* ddelta_bias = reinterpret_cast<float*>(params.ddelta_bias_ptr) + channel_id;
     float ddelta_bias_val = 0.f;
 
+    float* dh_init_ptr = params.h_init_ptr == nullptr
+        ? nullptr
+        : reinterpret_cast<float*>(params.dh_init_ptr)
+            + batch_id * params.dh_init_batch_stride
+            + channel_id * params.dh_init_channel_stride;
+
     float* dout = reinterpret_cast<float*>(params.dout_ptr)
         + batch_id * params.dout_batch_stride
         + channel_id * params.dout_channel_stride
         + (params.num_chunks - 1) * kChunkSize;
     
+    float* dh_last = reinterpret_cast<float*>(params.dh_last_ptr)
+        + batch_id * params.dh_last_batch_stride
+        + channel_id * params.dh_last_channel_stride;
+    
+    int length = (int)reinterpret_cast<int64_t*>(params.length_ptr)[batch_id];
+
     for (int chunk_id = params.num_chunks - 1; chunk_id >= 0; chunk_id--) {
+        int chunk_start_idx = chunk_id * kChunkSize;
+        int segment_start_idx = chunk_start_idx + threadIdx.x * kNumElements;
+
         float u_vals[kNumElements];
         float delta_raw_vals[kNumElements];
         float delta_vals[kNumElements];
@@ -196,148 +217,187 @@ void backward_kernel(BackwardSSParams params) {
         float dout_vals[kNumElements];
         float du_vals[kNumElements];
         float ddelta_vals[kNumElements] = {0};
-
-        __syncthreads();
-        load<Traits>(u, u_vals, smem_load, params.seq_len - chunk_id * kChunkSize);
-        __syncthreads();
-        load<Traits>(delta, delta_raw_vals, smem_load, params.seq_len - chunk_id * kChunkSize);
-        __syncthreads();
-        load<Traits>(dout, dout_vals, smem_load, params.seq_len - chunk_id * kChunkSize);
         
-        #pragma unroll
-        for (int i = 0; i < kNumElements; i++) {
-            delta_vals[i] = delta_raw_vals[i] + delta_bias_val;
-            delta_vals[i] = delta_vals[i] <= 20.f
-                ? log1pf(expf(delta_vals[i]))
-                : delta_vals[i];
-            
-            delta_u_vals[i] = delta_vals[i] * u_vals[i];
-        }
-        
-        #pragma unroll
-        for (int i = 0; i < kNumElements; i++) {
-            du_vals[i] = D_val * dout_vals[i];
-        }
+        if (chunk_start_idx >= length) {
+            #pragma unroll
+            for (int i = 0; i < kNumElements; i++) {
+                du_vals[i] = 0.f;
+            }
 
-        #pragma unroll
-        for (int i = 0; i < kNumElements; i++) {
-            dD_val += dout_vals[i] * u_vals[i];
+            for (int state_id = 0; state_id < params.state_dim; state_id++) {
+                float dh_last_val = dh_last[state_id];
+                if (threadIdx.x == 0) {
+                    smem_delta_a[state_id + (chunk_id % 2) * kMaxStateDim] = 1.f;
+                    smem_running_postfix[state_id] = make_float2(1.f, dh_last_val);
+                    smem_da[state_id] = 0.f;
+                }
+            }
         }
-
-        __syncthreads();
-        for (int state_id = 0; state_id < params.state_dim; state_id++) {
-            float A_val = A[state_id];
-            float B_vals[kNumElements];
-            float C_vals[kNumElements];
-            float dA_val = 0.f;
-            float dB_vals[kNumElements];
-            float dC_vals[kNumElements];
-
-            load<Traits>(
-                B + state_id * params.B_state_stride,
-                B_vals,
-                smem_load,
-                params.seq_len - chunk_id * kChunkSize
-            );
+        else {
             __syncthreads();
-            load<Traits>(
-                C + state_id * params.C_state_stride,
-                C_vals,
-                smem_load,
-                params.seq_len - chunk_id * kChunkSize
-            );
-
-            float2 h_vals[kNumElements];
-            float2 dh_vals[kNumElements];
+            load<Traits>(u, u_vals, smem_load, length - chunk_id * kChunkSize);
+            __syncthreads();
+            load<Traits>(delta, delta_raw_vals, smem_load, length - chunk_id * kChunkSize);
+            __syncthreads();
+            load<Traits>(dout, dout_vals, smem_load, length - chunk_id * kChunkSize);
             
             #pragma unroll
             for (int i = 0; i < kNumElements; i++) {
-                const float delta_a_exp = exp2f(delta_vals[i] * A_val * M_LOG2E);
-                h_vals[i] = make_float2(
-                    delta_a_exp,
-                    delta_u_vals[i] * B_vals[i]
+                delta_vals[i] = delta_raw_vals[i] + delta_bias_val;
+                delta_vals[i] = delta_vals[i] <= 20.f
+                    ? log1pf(expf(delta_vals[i]))
+                    : delta_vals[i];
+                
+                delta_u_vals[i] = delta_vals[i] * u_vals[i];
+            }
+            
+            #pragma unroll
+            for (int i = 0; i < kNumElements; i++) {
+                du_vals[i] = D_val * dout_vals[i];
+            }
+    
+            #pragma unroll
+            for (int i = 0; i < kNumElements; i++) {
+                dD_val += dout_vals[i] * u_vals[i];
+            }
+    
+            __syncthreads();
+            for (int state_id = 0; state_id < params.state_dim; state_id++) {
+                float A_val = A[state_id];
+                float B_vals[kNumElements];
+                float C_vals[kNumElements];
+                float dA_val = 0.f;
+                float dB_vals[kNumElements];
+                float dC_vals[kNumElements];
+                float h_init_val = h_init == nullptr ? 0.f : h_init[state_id];
+                float dh_last_val = dh_last[state_id];
+    
+                load<Traits>(
+                    B + state_id * params.B_state_stride,
+                    B_vals,
+                    smem_load,
+                    length - chunk_id * kChunkSize
                 );
-
-                if (i == 0) {
-                    smem_delta_a[
-                        threadIdx.x == 0
-                            ? state_id + (chunk_id % 2) * kMaxStateDim
-                            : threadIdx.x + 2 * kMaxStateDim
-                    ] = delta_a_exp;
+                __syncthreads();
+                load<Traits>(
+                    C + state_id * params.C_state_stride,
+                    C_vals,
+                    smem_load,
+                    length - chunk_id * kChunkSize
+                );
+    
+                float2 h_vals[kNumElements];
+                float2 dh_vals[kNumElements];
+    
+                #pragma unroll
+                for (int i = 0; i < kNumElements; i++) {
+                    int token_idx = segment_start_idx + i;
+                    if (token_idx >= length) {
+                        h_vals[i] = make_float2(1.f, 0.f);
+                        dh_vals[i].y = 0.f;
+                    }
+                    else {
+                        const float delta_a_exp = exp2f(delta_vals[i] * A_val * M_LOG2E);
+                        h_vals[i] = make_float2(
+                            delta_a_exp,
+                            delta_u_vals[i] * B_vals[i]
+                        );
+                        dh_vals[i].y = dout_vals[i] * C_vals[i];
+                    }
+    
+                    if (i == 0) {
+                        smem_delta_a[
+                            threadIdx.x == 0
+                                ? state_id + (chunk_id % 2) * kMaxStateDim
+                                : threadIdx.x + 2 * kMaxStateDim
+                        ] = h_vals[i].x;
+                    }
+                    else {
+                        dh_vals[i - 1].x = h_vals[i].x;
+                    }
                 }
-                else {
-                    dh_vals[i - 1].x = delta_a_exp;
+    
+                __syncthreads();
+                dh_vals[kNumElements - 1].x = threadIdx.x == kNumThreads - 1
+                    ? (chunk_id == params.num_chunks - 1 ? 1.f : smem_delta_a[state_id + ((chunk_id + 1) % 2) * kMaxStateDim])
+                    : smem_delta_a[threadIdx.x + 1 + 2 * kMaxStateDim];
+                
+                float2 running_prefix = threadIdx.x % 32 != 0
+                    ? make_float2(1.f, 0.f)
+                    : (
+                        chunk_id == 0
+                            ? make_float2(1.f, h_init_val)
+                            : h[(chunk_id - 1) * params.state_dim  + state_id]
+                    );
+                StateCarryCallbackOp prefix_op(running_prefix);
+                typename Traits::BlockScan(smem_scan).InclusiveScan(h_vals, h_vals, ScanOp(), prefix_op);
+    
+                float2 running_postfix = threadIdx.x % 32 != 0
+                    ? make_float2(1.f, 0.f)
+                    : (
+                        chunk_id == params.num_chunks - 1
+                        ? make_float2(1.f, dh_last_val)
+                        : smem_running_postfix[state_id]
+                    );
+                StateCarryCallbackOp postfix_op(running_postfix);
+                typename Traits::BlockReverseScan(smem_reverse_scan).InclusiveReverseScan(dh_vals, dh_vals, ScanOp(), postfix_op);
+                if (threadIdx.x == 0) {
+                    smem_running_postfix[state_id] = postfix_op.carry;
                 }
-                dh_vals[i].y = dout_vals[i] * C_vals[i];
+
+                if (threadIdx.x == 0 && chunk_id == 0 && dh_init_ptr != nullptr) {
+                    dh_init_ptr[state_id] = h_vals[0].x * dh_vals[0].y; 
+                }
+    
+                #pragma unroll
+                for (int i = 0; i < kNumElements; i++) {
+                    bool valid = segment_start_idx + i < length;
+                    const float dh_val = dh_vals[i].y;
+                    const float ddelta_u = dh_val * B_vals[i];
+                    du_vals[i] += ddelta_u * delta_vals[i];
+                    const float at_ht = h_vals[i].y - (delta_u_vals[i] * B_vals[i]);
+                    ddelta_vals[i] += valid ? ddelta_u * u_vals[i] + dh_val * A_val * at_ht : 0.f;
+                    dA_val += valid ? dh_val * delta_vals[i] * at_ht : 0.f;
+                    dB_vals[i] = dh_val * delta_u_vals[i];
+                    dC_vals[i] = dout_vals[i] * h_vals[i].y;
+                }
+    
+                typename Traits::BlockExchange(smem_exchange).BlockedToStriped(dB_vals, dB_vals);
+                __syncthreads();
+                typename Traits::BlockExchange(smem_exchange).BlockedToStriped(dC_vals, dC_vals);
+    
+                const int seqlen_remaining = length - chunk_id * kChunkSize - threadIdx.x;
+    
+                float* dB_cur = dB + state_id * params.dB_state_stride + threadIdx.x;
+                float* dC_cur = dC + state_id * params.dC_state_stride + threadIdx.x;
+    
+                #pragma unroll
+                for (int i = 0; i < kNumElements; i++) {
+                    if (i * kNumThreads < seqlen_remaining) {
+                        gpuAtomicAdd(dB_cur + i * kNumThreads, dB_vals[i]);
+                        gpuAtomicAdd(dC_cur + i * kNumThreads, dC_vals[i]);
+                    }
+                }
+    
+                dA_val = typename Traits::ScalarBlockReduce(smem_reduce).Sum(dA_val);
+    
+                if (threadIdx.x == 0) {
+                    smem_da[state_id] = chunk_id == params.num_chunks - 1
+                        ? dA_val
+                        : dA_val + smem_da[state_id];
+                }
             }
-
-            __syncthreads();
-            dh_vals[kNumElements - 1].x = threadIdx.x == kNumThreads - 1
-                ? (chunk_id == params.num_chunks - 1 ? 1.f : smem_delta_a[state_id + ((chunk_id + 1) % 2) * kMaxStateDim])
-                : smem_delta_a[threadIdx.x + 1 + 2 * kMaxStateDim];
-            
-            float2 running_prefix = chunk_id > 0 && threadIdx.x % 32 == 0
-                ? h[(chunk_id - 1) * params.state_dim + state_id]
-                : make_float2(1.f, 0.f);
-            StateCarryCallbackOp prefix_op(running_prefix);
-            typename Traits::BlockScan(smem_scan).InclusiveScan(h_vals, h_vals, ScanOp(), prefix_op);
-
-            float2 running_postfix = chunk_id < params.num_chunks - 1 && threadIdx.x % 32 == 0
-                ? smem_running_postfix[state_id]
-                : make_float2(1.f, 0.f);
-            StateCarryCallbackOp postfix_op(running_postfix);
-            typename Traits::BlockReverseScan(smem_reverse_scan).InclusiveReverseScan(dh_vals, dh_vals, ScanOp(), postfix_op);
-            if (threadIdx.x == 0) {
-                smem_running_postfix[state_id] = postfix_op.carry;
-            }
-
+    
             #pragma unroll
             for (int i = 0; i < kNumElements; i++) {
-                const float dh_val = dh_vals[i].y;
-                const float ddelta_u = dh_val * B_vals[i];
-                du_vals[i] += ddelta_u * delta_vals[i];
-                const float at_ht = h_vals[i].y - (delta_u_vals[i] * B_vals[i]);
-                ddelta_vals[i] += ddelta_u * u_vals[i] + dh_val * A_val * at_ht;
-                dA_val += dh_val * delta_vals[i] * at_ht;
-                dB_vals[i] = dh_val * delta_u_vals[i];
-                dC_vals[i] = dout_vals[i] * h_vals[i].y;
-            }
-
-            typename Traits::BlockExchange(smem_exchange).BlockedToStriped(dB_vals, dB_vals);
-            __syncthreads();
-            typename Traits::BlockExchange(smem_exchange).BlockedToStriped(dC_vals, dC_vals);
-
-            const int seqlen_remaining = params.seq_len - chunk_id * kChunkSize - threadIdx.x;
-
-            float* dB_cur = dB + state_id * params.dB_state_stride + threadIdx.x;
-            float* dC_cur = dC + state_id * params.dC_state_stride + threadIdx.x;
-
-            #pragma unroll
-            for (int i = 0; i < kNumElements; i++) {
-                if (i * kNumThreads < seqlen_remaining) {
-                    gpuAtomicAdd(dB_cur + i * kNumThreads, dB_vals[i]);
-                    gpuAtomicAdd(dC_cur + i * kNumThreads, dC_vals[i]);
-                }
-            }
-
-            dA_val = typename Traits::ScalarBlockReduce(smem_reduce).Sum(dA_val);
-
-            if (threadIdx.x == 0) {
-                smem_da[state_id] = chunk_id == params.num_chunks - 1
-                    ? dA_val
-                    : dA_val + smem_da[state_id];
+                float delta_val = delta_raw_vals[i] + delta_bias_val;
+                ddelta_vals[i] = delta_val <= 20.f
+                    ? ddelta_vals[i] / (1.f + expf(-delta_val))
+                    : ddelta_vals[i];
+                ddelta_bias_val += ddelta_vals[i];
             }
         }
 
-        #pragma unroll
-        for (int i = 0; i < kNumElements; i++) {
-            float delta_val = delta_raw_vals[i] + delta_bias_val;
-            ddelta_vals[i] = delta_val <= 20.f
-                ? ddelta_vals[i] / (1.f + expf(-delta_val))
-                : ddelta_vals[i];
-            ddelta_bias_val += ddelta_vals[i];
-        }
-        
         __syncthreads();
         store<Traits>(du_vals, du, smem_store, params.seq_len - chunk_id * kChunkSize);
         
