@@ -50,7 +50,12 @@ class Block(nn.Module):
         )
         self.dropout = nn.Dropout(config.dropout_rate)
     
-    def forward(self, hiddens_states: torch.Tensor, lengths: torch.Tensor | None = None):
+    def forward(
+        self, 
+        hiddens_states: torch.Tensor, 
+        lengths: torch.Tensor | None = None,
+        use_cache: bool = False
+    ):
         """
         Args:
             hidden_states: (batch_size, seq_len, model_dim)
@@ -60,9 +65,14 @@ class Block(nn.Module):
         """
         residual = hiddens_states
         hiddens_states = self.norm(hiddens_states)
-        hiddens_states = self.ssm(hiddens_states, lengths)
+        hiddens_states, _ = self.ssm(
+            hiddens_states, 
+            lengths=lengths,
+            use_cache=use_cache
+        )
         hiddens_states = self.dropout(hiddens_states)
-        return residual + hiddens_states
+        hiddens_states = residual + hiddens_states
+        return hiddens_states
 
     def step(self, hidden_states: torch.Tensor):
         """
@@ -92,14 +102,19 @@ class CausalLM(nn.Module):
         if config.tie_embeddings:
             self.lm_head.weight = self.embedding.weight
     
-    def forward(self, input_ids: torch.Tensor, lengths: torch.Tensor | None = None):
+    def forward(
+        self, 
+        input_ids: torch.Tensor,
+        lengths: torch.Tensor | None = None,
+        use_cache: bool = False
+    ):
         """
         Args: (batch_size, seq_len)
         Returns: (batch_size, seq_len, vocab_size)
         """
         hidden_states = self.embedding(input_ids)
         for layer in self.layers:
-            hidden_states = layer(hidden_states, lengths)
+            hidden_states = layer(hidden_states, lengths, use_cache)
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
         return logits
@@ -130,10 +145,10 @@ class CausalLM(nn.Module):
             lengths = (input_ids != pad_id).sum(dim=1)
             last_indices = lengths - 1
 
-            logits = self.forward(input_ids, lengths)
+            logits = self.forward(input_ids, lengths, use_cache=True)
             logits = logits[torch.arange(batch_size, device=device), last_indices]
             
-            seq_ids =  input_ids
+            seq_ids = input_ids
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
             
             for _ in range(max_new_tokens):
