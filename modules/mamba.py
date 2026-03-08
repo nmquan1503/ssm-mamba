@@ -79,15 +79,26 @@ class Mamba(nn.Module):
         self._ssm_hiddens = None
         self._conv_context = None
 
-    def forward(self, hidden_states: torch.Tensor, lengths: torch.Tensor | None = None):
+    def forward(
+        self, 
+        hidden_states: torch.Tensor,
+        ssm_hiddens: torch.Tensor | None = None, 
+        lengths: torch.Tensor | None = None, 
+        use_cache: bool = False
+    ):
         """
-        Args: (batch_size, seq_len, model_dim)
-        Returns: (batch_size, seq_len, model_dim)
+        Args: 
+            hidden_states: (batch_size, seq_len, model_dim)
+            ssm_hiddens: (batch_size, inner_dim, state_dim)
+            lengths: (batch_size,)
+        
+        Returns: 
+            hidden_states: (batch_size, seq_len, model_dim)
+            last_ssm_hiddens: (batch_size, inner_dim, state_dim)
         """
 
         batch_size, seq_len, _ = hidden_states.shape
         device = hidden_states.device
-        use_cache = lengths is not None
 
         # (batch_size, inner_dim, seq_len)
         hidden_states, gate_logis = torch.chunk(
@@ -149,19 +160,15 @@ class Mamba(nn.Module):
 
         # out: (batch_size, inner_dim, seq_len)
         # h: (batch_size, inner_dim, state_dim)
-        scan_outputs = SelectiveScanFn.apply(
+        hidden_states, last_ssm_hiddens = SelectiveScanFn.apply(
             hidden_states, 
             A, B, C, self.D, 
             delta, self.delta_proj.bias,
-            lengths,
-            lengths is not None
+            ssm_hiddens, lengths
         );
 
         if use_cache:
-            hidden_states = scan_outputs[0]
-            self._ssm_hiddens = scan_outputs[1]
-        else:
-            hidden_states = scan_outputs
+            self._ssm_hiddens = last_ssm_hiddens
         
         # (batch_size, seq_len, inner_dim)
         hidden_states = hidden_states.permute(0, 2, 1).contiguous()
@@ -170,7 +177,7 @@ class Mamba(nn.Module):
         # (batch_size, seq_len, model_dim)
         hidden_states = self.out_proj(hidden_states)
         
-        return hidden_states
+        return hidden_states, last_ssm_hiddens
 
     def step(self, hidden_states: torch.Tensor):
         """
