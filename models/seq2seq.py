@@ -97,7 +97,7 @@ class DecoderBlock(nn.Module):
             delta_init_floor=config.delta_init_floor,
             device=config.device
         )
-        self.bridge = HiddenBridge(channels=config.model_dim * config.expansion_factor)
+        self.bridge = HiddenBridge(channels=config.model_dim * config.expansion_factor, states=config.state_dim)
         self.dropout = nn.Dropout(config.dropout_rate)
 
     def forward(
