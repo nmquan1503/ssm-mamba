@@ -55,7 +55,7 @@ class SelectiveScanFn(torch.autograd.Function):
                 h, h_init, length
             )
         
-        return out, h[..., 1::2]
+        return out, h[..., -1, 1::2]
 
     @staticmethod
     def backward(ctx, dout, dh_last):
