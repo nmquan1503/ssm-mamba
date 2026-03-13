@@ -3,7 +3,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
-from ..modules import RMSNorm, Mamba, HiddenBridge
+from ..modules import Block, RMSNorm
 
 @dataclass
 class Seq2SeqModelConfig:
@@ -34,108 +34,6 @@ class Seq2SeqModelConfig:
 
     device: str | None = None
 
-class EncoderBlock(nn.Module):
-    def __init__(self, config: Seq2SeqModelConfig):
-        super().__init__()
-        self.norm = RMSNorm(config.model_dim)
-        self.ssm = Mamba(
-            model_dim=config.model_dim,
-            state_dim=config.state_dim,
-            expansion_factor=config.expansion_factor,
-            bias=config.bias,
-            conv_kernel=config.conv_kernel,
-            conv_bias=config.conv_bias,
-            delta_rank=config.delta_rank,
-            delta_min=config.delta_min,
-            delta_max=config.delta_max,
-            delta_init=config.delta_init,
-            delta_scale=config.delta_scale,
-            delta_init_floor=config.delta_init_floor,
-            device=config.device
-        )
-        self.dropout = nn.Dropout(config.dropout_rate)
-    
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        lengths: torch.Tensor
-    ):
-        """
-        Args:
-            hidden_states: (batch_size, seq_len, model_dim)
-            lengths: (batch_size,)
-        Returns:
-            hidden_states: (batch_size, seq_len, model_dim)
-            last_ssm_hiddens: (batch_size, inner_dim, state_dim)
-        """
-        residual = hidden_states
-        hidden_states = self.norm(hidden_states)
-        hidden_states, last_ssm_hiddens = self.ssm(
-            hidden_states,
-            lengths=lengths
-        )
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = residual + hidden_states
-        return hidden_states, last_ssm_hiddens
-    
-class DecoderBlock(nn.Module):
-    def __init__(self, config: Seq2SeqModelConfig):
-        super().__init__()
-        self.norm = RMSNorm(config.model_dim)
-        self.ssm = Mamba(
-            model_dim=config.model_dim,
-            state_dim=config.state_dim,
-            expansion_factor=config.expansion_factor,
-            bias=config.bias,
-            conv_kernel=config.conv_kernel,
-            conv_bias=config.conv_bias,
-            delta_rank=config.delta_rank,
-            delta_min=config.delta_min,
-            delta_max=config.delta_max,
-            delta_init=config.delta_init,
-            delta_scale=config.delta_scale,
-            delta_init_floor=config.delta_init_floor,
-            device=config.device
-        )
-        self.bridge = HiddenBridge(channels=config.model_dim * config.expansion_factor, states=config.state_dim)
-        self.dropout = nn.Dropout(config.dropout_rate)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        ssm_hiddens: torch.Tensor,
-        use_cache: bool = False
-    ):
-        """
-        Args:
-            hidden_states: (batch_size, seq_len, model_dim)
-            ssm_hiddens: (batch_size, inner_dim, state_dim)
-        
-        Returns: (batch_size, seq_len, model_dim)
-        """
-        residual = hidden_states
-        hidden_states = self.norm(hidden_states)
-        ssm_hiddens = self.bridge(ssm_hiddens)
-        hidden_states, _ = self.ssm(
-            hidden_states,
-            ssm_hiddens,
-            use_cache=use_cache
-        )
-        hidden_states = self.dropout(hidden_states)
-        return residual + hidden_states
-
-    def step(
-        self,
-        hidden_states: torch.Tensor
-    ):
-        """
-        Args: (batch_size, model_dim)
-        Returns: (batch_size, model_dim)
-        """
-        residual = hidden_states
-        hidden_states = self.norm(hidden_states)
-        hidden_states = self.ssm.step(hidden_states)
-        return residual + hidden_states
 
 class Seq2SeqModel(nn.Module):
     def __init__(self, config: Seq2SeqModelConfig | None = None):
@@ -148,13 +46,45 @@ class Seq2SeqModel(nn.Module):
         
         self.src_embedding = nn.Embedding(config.src_vocab_size, config.model_dim)
         self.encoder_layers = nn.ModuleList([
-            EncoderBlock(config)
+            Block(
+                model_dim=config.model_dim,
+                state_dim=config.state_dim,
+                expansion_factor=config.expansion_factor,
+                conv_kernel=config.conv_kernel,
+                conv_bias=config.conv_bias,
+                bias=config.bias,
+                delta_rank=config.delta_rank,
+                delta_min=config.delta_min,
+                delta_max=config.delta_max,
+                delta_init=config.delta_init,
+                delta_scale=config.delta_scale,
+                delta_init_floor=config.delta_init_floor,
+                dropout_rate=config.dropout_rate,
+                device=config.device,
+                use_hidden_bridge=False
+            )
             for _ in range(config.num_encoder_layers)
         ])
         
         self.tgt_embedding = nn.Embedding(config.tgt_vocab_size, config.model_dim)
         self.decoder_layers = nn.ModuleList([
-            DecoderBlock(config)
+            Block(
+                model_dim=config.model_dim,
+                state_dim=config.state_dim,
+                expansion_factor=config.expansion_factor,
+                conv_kernel=config.conv_kernel,
+                conv_bias=config.conv_bias,
+                bias=config.bias,
+                delta_rank=config.delta_rank,
+                delta_min=config.delta_min,
+                delta_max=config.delta_max,
+                delta_init=config.delta_init,
+                delta_scale=config.delta_scale,
+                delta_init_floor=config.delta_init_floor,
+                dropout_rate=config.dropout_rate,
+                device=config.device,
+                use_hidden_bridge=True
+            )
             for _ in range(config.num_decoder_layers)
         ])
 
@@ -180,11 +110,11 @@ class Seq2SeqModel(nn.Module):
         """
         hidden_states = self.src_embedding(input_ids)
         for layer in self.encoder_layers:
-            hidden_states, last_ssm_hiddens = layer(hidden_states, lengths)
+            hidden_states, last_ssm_hiddens = layer(hidden_states, lengths=lengths)
         
         hidden_states = self.tgt_embedding(tgt_ids)
         for layer in self.decoder_layers:
-            hidden_states = layer(hidden_states, last_ssm_hiddens, use_cache)
+            hidden_states, _ = layer(hidden_states, ssm_hiddens=last_ssm_hiddens, use_cache=use_cache)
         
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
@@ -217,9 +147,10 @@ class Seq2SeqModel(nn.Module):
 
             lengths = (input_ids != pad_id).sum(dim=1)
 
-            seq_ids = torch.full((batch_size, 1), bos_id, dtype=torch.long)
+            seq_ids = torch.full((batch_size, 1), bos_id, dtype=torch.long, device=device)
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
             logits = self.forward(input_ids, lengths, seq_ids, use_cache=True)
+            logits = logits[:, -1]
 
             for _ in range(max_new_tokens):
                 if temperature != 1.0:

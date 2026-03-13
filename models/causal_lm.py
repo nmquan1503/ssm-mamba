@@ -3,7 +3,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
-from ..modules import Mamba, RMSNorm
+from ..modules import RMSNorm, Block
 
 @dataclass
 class CausalLMConfig:
@@ -28,61 +28,6 @@ class CausalLMConfig:
     bos_token_id: int = 1
     eos_token_id: int = 2
 
-class Block(nn.Module):
-    def __init__(self, config: CausalLMConfig):
-        super().__init__()
-        
-        self.norm = RMSNorm(config.model_dim)
-        self.ssm = Mamba(
-            model_dim=config.model_dim,
-            state_dim=config.state_dim,
-            expansion_factor=config.expansion_factor,
-            bias=config.bias,
-            conv_kernel=config.conv_kernel,
-            conv_bias=config.conv_bias,
-            delta_rank=config.delta_rank,
-            delta_min=config.delta_min,
-            delta_max=config.delta_max,
-            delta_init=config.delta_init,
-            delta_scale=config.delta_scale,
-            delta_init_floor=config.delta_init_floor,
-            device=config.device
-        )
-        self.dropout = nn.Dropout(config.dropout_rate)
-    
-    def forward(
-        self, 
-        hiddens_states: torch.Tensor, 
-        lengths: torch.Tensor | None = None,
-        use_cache: bool = False
-    ):
-        """
-        Args:
-            hidden_states: (batch_size, seq_len, model_dim)
-            lengths: (batch_size,)
-        Returns:
-            (batch_size, seq_len, model_dim)
-        """
-        residual = hiddens_states
-        hiddens_states = self.norm(hiddens_states)
-        hiddens_states, _ = self.ssm(
-            hiddens_states, 
-            lengths=lengths,
-            use_cache=use_cache
-        )
-        hiddens_states = self.dropout(hiddens_states)
-        hiddens_states = residual + hiddens_states
-        return hiddens_states
-
-    def step(self, hidden_states: torch.Tensor):
-        """
-        Args: (batch_size, model_dim)
-        Returns: (batch_size, model_dim)
-        """
-        residual = hidden_states
-        hidden_states = self.norm(hidden_states)
-        hidden_states = self.ssm.step(hidden_states)
-        return residual + hidden_states
     
 class CausalLM(nn.Module):
     def __init__(self, config: CausalLMConfig | None = None):
@@ -94,7 +39,23 @@ class CausalLM(nn.Module):
         self.config = config
         self.embedding = nn.Embedding(config.vocab_size, config.model_dim)
         self.layers = nn.ModuleList([
-            Block(config)
+            Block(
+                model_dim=config.model_dim,
+                state_dim=config.state_dim,
+                expansion_factor=config.expansion_factor,
+                conv_kernel=config.conv_kernel,
+                conv_bias=config.conv_bias,
+                bias=config.bias,
+                delta_rank=config.delta_rank,
+                delta_min=config.delta_min,
+                delta_max=config.delta_max,
+                delta_init=config.delta_init,
+                delta_scale=config.delta_scale,
+                delta_init_floor=config.delta_init_floor,
+                dropout_rate=config.dropout_rate,
+                use_hidden_bridge=False,
+                device=config.device
+            )
             for _ in range(config.num_layers)
         ])
         self.norm = RMSNorm(config.model_dim)
@@ -114,7 +75,11 @@ class CausalLM(nn.Module):
         """
         hidden_states = self.embedding(input_ids)
         for layer in self.layers:
-            hidden_states = layer(hidden_states, lengths, use_cache)
+            hidden_states, _ = layer(
+                hidden_states, 
+                lengths=lengths, 
+                use_cache=use_cache
+            )
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
         return logits
