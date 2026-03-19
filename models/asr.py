@@ -28,8 +28,7 @@ class ASRModelConfig:
     delta_scale: float = 1.0
     delta_init_floor: float = 1e-4
 
-    num_encoder_layers: int = 12
-    num_decoder_layers: int = 2
+    num_layers: int = 12
 
     dropout_rate: float = 0.15
 
@@ -66,7 +65,7 @@ class ASRModel(nn.Module):
                 device=config.device,
                 use_hidden_bridge=False
             )
-            for _ in range(config.num_encoder_layers)
+            for _ in range(config.num_layers)
         ])
 
         self.tgt_embedding = nn.Embedding(config.vocab_size, config.model_dim)
@@ -89,7 +88,7 @@ class ASRModel(nn.Module):
                 device=config.device,
                 use_hidden_bridge=True
             )
-            for _ in range(config.num_decoder_layers)
+            for _ in range(config.num_layers)
         ])
 
         self.norm = RMSNorm(config.model_dim)
@@ -114,17 +113,14 @@ class ASRModel(nn.Module):
             logits: (batch_size, out_seq_len, vocab_size)
         """
 
-        hidden_states = self.input_proj(features)
+        enc_hidden_states = self.input_proj(features)
+        dec_hidden_states = self.tgt_embedding(tgt_ids)
 
-        for layer in self.encoder_layers:
-            hidden_states, last_ssm_hiddens = layer(hidden_states, lengths=lengths)
-
-        hidden_states = self.tgt_embedding(tgt_ids)
-
-        for layer in self.decoder_layers:
-            hidden_states, _ = layer(
-                hidden_states, 
-                ssm_hiddens=last_ssm_hiddens, 
+        for enc_layer, dec_layer in zip(self.encoder_layers, self.decoder_layers):
+            enc_hidden_states, enc_ssm_hiddens = enc_layer(enc_hidden_states, lengths=lengths)
+            dec_hidden_states, _ = dec_layer(
+                dec_hidden_states,
+                ssm_hiddens=enc_ssm_hiddens,
                 use_cache=use_cache
             )
 
