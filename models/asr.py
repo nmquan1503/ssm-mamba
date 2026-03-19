@@ -124,7 +124,7 @@ class ASRModel(nn.Module):
                 use_cache=use_cache
             )
 
-        hidden_states = self.norm(hidden_states)
+        hidden_states = self.norm(dec_hidden_states)
         logits = self.lm_head(hidden_states)
 
         return logits
