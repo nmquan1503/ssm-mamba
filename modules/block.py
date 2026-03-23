@@ -21,7 +21,6 @@ class Block(nn.Module):
         delta_scale: float = 1.0,
         delta_init_floor: float = 1e-4,
         dropout_rate: float = 0.15,
-        use_hidden_bridge: bool = False,
         device: str | None = None
     ):
         super().__init__()
@@ -44,13 +43,6 @@ class Block(nn.Module):
             device=device
         )
 
-        if use_hidden_bridge:
-            self.hidden_bridge = HiddenBridge(
-                channels=model_dim * expansion_factor
-            )
-        else:
-            self.hidden_bridge = None
-
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(
@@ -71,9 +63,6 @@ class Block(nn.Module):
 
         residual = hidden_states
         hidden_states = self.norm(hidden_states)
-
-        if self.hidden_bridge is not None and ssm_hiddens is not None:
-            ssm_hiddens = self.hidden_bridge(ssm_hiddens)
 
         hidden_states, last_ssm_hiddens = self.ssm(
             hidden_states,

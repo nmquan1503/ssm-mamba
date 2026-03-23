@@ -113,6 +113,13 @@ class Mamba(nn.Module):
         if use_cache:
             # Cache conv hidden
             cache_size = self.conv_kernel - 1
+            if lengths is None:
+                lengths = torch.full(
+                    (batch_size,),
+                    seq_len,
+                    device=device,
+                    dtype=torch.long
+                )
             window_start = lengths - cache_size
             offsets = torch.arange(cache_size, device=device)
             indices = window_start.unsqueeze(1) + offsets.unsqueeze(0)

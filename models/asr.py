@@ -63,7 +63,6 @@ class ASRModel(nn.Module):
                 delta_init_floor=config.delta_init_floor,
                 dropout_rate=config.dropout_rate,
                 device=config.device,
-                use_hidden_bridge=False
             )
             for _ in range(config.num_layers)
         ])
@@ -86,7 +85,6 @@ class ASRModel(nn.Module):
                 delta_init_floor=config.delta_init_floor,
                 dropout_rate=config.dropout_rate,
                 device=config.device,
-                use_hidden_bridge=True
             )
             for _ in range(config.num_layers)
         ])
@@ -116,12 +114,23 @@ class ASRModel(nn.Module):
         enc_hidden_states = self.input_proj(features)
         dec_hidden_states = self.tgt_embedding(tgt_ids)
 
+        if use_cache:
+            dec_input_lengths = torch.full(
+                (tgt_ids.size(0),),
+                fill_value=tgt_ids.size(1),
+                device=tgt_ids.device,
+                dtype=torch.long
+            )
+        else:
+            dec_input_lengths = None
+
         for enc_layer, dec_layer in zip(self.encoder_layers, self.decoder_layers):
             enc_hidden_states, enc_ssm_hiddens = enc_layer(enc_hidden_states, lengths=lengths)
             dec_hidden_states, _ = dec_layer(
                 dec_hidden_states,
                 ssm_hiddens=enc_ssm_hiddens,
-                use_cache=use_cache
+                use_cache=use_cache,
+                lengths=dec_input_lengths
             )
 
         hidden_states = self.norm(dec_hidden_states)

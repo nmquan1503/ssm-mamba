@@ -61,7 +61,6 @@ class Seq2SeqModel(nn.Module):
                 delta_init_floor=config.delta_init_floor,
                 dropout_rate=config.dropout_rate,
                 device=config.device,
-                use_hidden_bridge=False
             )
             for _ in range(config.num_encoder_layers)
         ])
@@ -83,7 +82,6 @@ class Seq2SeqModel(nn.Module):
                 delta_init_floor=config.delta_init_floor,
                 dropout_rate=config.dropout_rate,
                 device=config.device,
-                use_hidden_bridge=True
             )
             for _ in range(config.num_decoder_layers)
         ])
@@ -113,8 +111,22 @@ class Seq2SeqModel(nn.Module):
             hidden_states, last_ssm_hiddens = layer(hidden_states, lengths=lengths)
         
         hidden_states = self.tgt_embedding(tgt_ids)
+        if use_cache:
+            dec_input_lengths = torch.full(
+                (tgt_ids.size(0),),
+                fill_value=tgt_ids.size(1),
+                device=tgt_ids.device,
+                dtype=torch.long
+            )
+        else:
+            dec_input_lengths = None
         for layer in self.decoder_layers:
-            hidden_states, _ = layer(hidden_states, ssm_hiddens=last_ssm_hiddens, use_cache=use_cache)
+            hidden_states, _ = layer(
+                hidden_states, 
+                ssm_hiddens=last_ssm_hiddens, 
+                lengths=dec_input_lengths,
+                use_cache=use_cache
+            )
         
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)

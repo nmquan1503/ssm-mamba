@@ -53,7 +53,6 @@ class CausalLM(nn.Module):
                 delta_scale=config.delta_scale,
                 delta_init_floor=config.delta_init_floor,
                 dropout_rate=config.dropout_rate,
-                use_hidden_bridge=False,
                 device=config.device
             )
             for _ in range(config.num_layers)
