@@ -191,7 +191,7 @@ class ASRModel(nn.Module):
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
             logits = self.forward(features, lengths, seq_ids, use_cache=True)
-            logits = logits[:, -1]
+            logits = logits[:, -1, :]
 
             for _ in range(max_new_tokens):
 
