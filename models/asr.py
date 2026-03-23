@@ -194,9 +194,6 @@ class ASRModel(nn.Module):
             logits = logits[:, -1, :]
 
             for _ in range(max_new_tokens):
-
-                logits = logits[:, -1]
-
                 if temperature != 1.0:
                     logits = logits / temperature
 
