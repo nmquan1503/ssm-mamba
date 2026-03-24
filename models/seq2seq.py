@@ -87,7 +87,7 @@ class Seq2SeqModel(nn.Module):
         self.norm = RMSNorm(config.model_dim)
         self.lm_head = nn.Linear(config.model_dim, config.vocab_size, bias=False)
         if config.tie_embeddings:
-            self.lm_head.weight = self.tgt_embedding.weight
+            self.lm_head.weight = self.embedding.weight
     
     def forward(
         self,
