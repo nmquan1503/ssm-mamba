@@ -7,8 +7,7 @@ from ..modules import Block, RMSNorm
 
 @dataclass
 class Seq2SeqModelConfig:
-    src_vocab_size: int = 32000
-    tgt_vocab_size: int = 32000
+    vocab_size: int = 32000
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
@@ -26,8 +25,7 @@ class Seq2SeqModelConfig:
     delta_scale: float = 1.0
     delta_init_floor: float = 1e-4
 
-    num_encoder_layers: int = 4
-    num_decoder_layers: int = 4
+    num_layers: int = 4
     tie_embeddings: bool = True
 
     dropout_rate: float = 0.15
@@ -44,7 +42,8 @@ class Seq2SeqModel(nn.Module):
 
         self.config = config
         
-        self.src_embedding = nn.Embedding(config.src_vocab_size, config.model_dim)
+        self.embedding = nn.Embedding(config.vocab_size, config.model_dim)
+
         self.encoder_layers = nn.ModuleList([
             Block(
                 model_dim=config.model_dim,
@@ -62,10 +61,9 @@ class Seq2SeqModel(nn.Module):
                 dropout_rate=config.dropout_rate,
                 device=config.device,
             )
-            for _ in range(config.num_encoder_layers)
+            for _ in range(config.num_layers)
         ])
         
-        self.tgt_embedding = nn.Embedding(config.tgt_vocab_size, config.model_dim)
         self.decoder_layers = nn.ModuleList([
             Block(
                 model_dim=config.model_dim,
@@ -83,7 +81,7 @@ class Seq2SeqModel(nn.Module):
                 dropout_rate=config.dropout_rate,
                 device=config.device,
             )
-            for _ in range(config.num_decoder_layers)
+            for _ in range(config.num_layers)
         ])
 
         self.norm = RMSNorm(config.model_dim)
@@ -106,11 +104,9 @@ class Seq2SeqModel(nn.Module):
         
         Returns: (batch_size, out_seq_len, tgt_vocab_size)
         """
-        hidden_states = self.src_embedding(input_ids)
-        for layer in self.encoder_layers:
-            hidden_states, last_ssm_hiddens = layer(hidden_states, lengths=lengths)
-        
-        hidden_states = self.tgt_embedding(tgt_ids)
+        enc_hidden_states = self.embedding(input_ids)
+        dec_hidden_states = self.embedding(tgt_ids)
+
         if use_cache:
             dec_input_lengths = torch.full(
                 (tgt_ids.size(0),),
@@ -120,16 +116,19 @@ class Seq2SeqModel(nn.Module):
             )
         else:
             dec_input_lengths = None
-        for layer in self.decoder_layers:
-            hidden_states, _ = layer(
-                hidden_states, 
-                ssm_hiddens=last_ssm_hiddens, 
-                lengths=dec_input_lengths,
-                use_cache=use_cache
+
+        for enc_layer, dec_layer in zip(self.encoder_layers, self.decoder_layers):
+            enc_hidden_states, enc_ssm_hiddens = enc_layer(enc_hidden_states, lengths=lengths)
+            dec_hidden_states, _ = dec_layer(
+                dec_hidden_states,
+                ssm_hiddens=enc_ssm_hiddens,
+                use_cache=use_cache,
+                lengths=dec_input_lengths
             )
         
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
+
         return logits
 
     def step(self, input_ids: torch.Tensor):
@@ -162,7 +161,7 @@ class Seq2SeqModel(nn.Module):
             seq_ids = torch.full((batch_size, 1), bos_id, dtype=torch.long, device=device)
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
             logits = self.forward(input_ids, lengths, seq_ids, use_cache=True)
-            logits = logits[:, -1]
+            logits = logits[:, -1, :]
 
             for _ in range(max_new_tokens):
                 if temperature != 1.0:
