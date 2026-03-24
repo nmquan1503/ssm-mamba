@@ -126,7 +126,7 @@ class Seq2SeqModel(nn.Module):
                 lengths=dec_input_lengths
             )
         
-        hidden_states = self.norm(hidden_states)
+        hidden_states = self.norm(dec_hidden_states)
         logits = self.lm_head(hidden_states)
 
         return logits
@@ -137,7 +137,7 @@ class Seq2SeqModel(nn.Module):
 
         Returns: (batch_size, tgt_vocab_size)
         """
-        hidden_states = self.tgt_embedding(input_ids)
+        hidden_states = self.embedding(input_ids)
         for layer in self.decoder_layers:
             hidden_states = layer.step(hidden_states)
         hidden_states = self.norm(hidden_states)
