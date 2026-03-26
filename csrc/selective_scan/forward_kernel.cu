@@ -8,13 +8,14 @@
 #include "selective_scan.h"
 #include "static_switch.h"
 
-template<bool kSeqDivisible_>
+template<bool kSeqDivisible_, bool kPaddingRight_>
 struct SSForwardKernelTraits {
     static constexpr int kNumThreads = kernel_config::num_threads;
     static constexpr int kMinBlocks = (kNumThreads < 128) ? 5 : 3;
     static constexpr int kNumElements = kernel_config::num_elements;
     static constexpr int kNumVectors = kNumElements / 4;
     static constexpr bool kSeqDivisible = kSeqDivisible_;
+    static constexpr bool kPaddingRight = kPaddingRight_;
     static constexpr bool kEnableDirectVectorIO = kSeqDivisible && (kNumVectors == 1);
 
     using ScalarBlockLoad = cub::BlockLoad<
@@ -70,6 +71,7 @@ __global__ __launch_bounds__(Traits::kNumThreads, Traits::kMinBlocks)
 void forward_kernel(ForwardSSParams params) {
     constexpr int kNumThreads = Traits::kNumThreads;
     constexpr int kNumElements = Traits::kNumElements;
+    constexpr bool kPaddingRight = Traits::kPaddingRight;
     constexpr bool kEnableDirectVectorIO = Traits::kEnableDirectVectorIO;
 
     extern __shared__ char smem_[];
@@ -191,8 +193,15 @@ void forward_kernel(ForwardSSParams params) {
                     exp2f(delta_vals[i] * A_val),
                     delta_u_vals[i] * B_vals[i]
                 );
-                if (base_token_idx + i >= length) {
-                    h_vals[i] = make_float2(1.f, 0.f);
+                if constexpr (kPaddingRight) {
+                    if (base_token_idx + i >= length) {
+                        h_vals[i] = make_float2(1.f, 0.f);
+                    }
+                }
+                else {
+                    if (base_token_idx + i < params.seq_len - length || base_token_idx + i >= params.seq_len) {
+                        h_vals[i] = make_float2(1.f, 0.f);
+                    }
                 }
             }
             
@@ -236,18 +245,20 @@ void forward_kernel(ForwardSSParams params) {
 
 void forward_kernel_launch(ForwardSSParams& params, cudaStream_t stream) {
     BOOL_SWITCH(params.seq_len % kernel_config::chunk_size == 0, kSeqDivisible, [&]{
-        using Traits = SSForwardKernelTraits<kSeqDivisible>;
-        DISPATCH_SWITCH(params.state_dim, MAX_STATE_DIM, [&]{
-            constexpr int kSMemSizeInBytes = Traits::kSMemSizeInBytes + MAX_STATE_DIM * sizeof(float2);
-            dim3 grid(params.batch_size, params.num_channels);
-            auto kernel = &forward_kernel<Traits>;
-            if (kSMemSizeInBytes >= 48 * 1024) {
-                C10_CUDA_CHECK(cudaFuncSetAttribute(
-                    kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSMemSizeInBytes
-                ));
-            }
-            kernel<<<grid, Traits::kNumThreads, kSMemSizeInBytes, stream>>>(params);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+        BOOL_SWITCH(params.padding_right, kPaddingRight, [&]{
+            using Traits = SSForwardKernelTraits<kSeqDivisible, kPaddingRight>;
+            DISPATCH_SWITCH(params.state_dim, MAX_STATE_DIM, [&]{
+                constexpr int kSMemSizeInBytes = Traits::kSMemSizeInBytes + MAX_STATE_DIM * sizeof(float2);
+                dim3 grid(params.batch_size, params.num_channels);
+                auto kernel = &forward_kernel<Traits>;
+                if (kSMemSizeInBytes >= 48 * 1024) {
+                    C10_CUDA_CHECK(cudaFuncSetAttribute(
+                        kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSMemSizeInBytes
+                    ));
+                }
+                kernel<<<grid, Traits::kNumThreads, kSMemSizeInBytes, stream>>>(params);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
         });
     });
 }

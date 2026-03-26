@@ -18,6 +18,7 @@ struct SSScanParams {
 
 struct BaseSSParams {
     int batch_size, seq_len, state_dim, num_channels;
+    bool padding_right;
     bool has_h_init;
     int num_chunks;
     
@@ -78,7 +79,8 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
     const std::optional<at::Tensor>& h_init_,
-    const std::optional<at::Tensor>& length_
+    const std::optional<at::Tensor>& length_,
+    const std::optional<std::string>& padding_side_
 );
 
 std::vector<at::Tensor> selective_scan_backward(
@@ -93,5 +95,6 @@ std::vector<at::Tensor> selective_scan_backward(
     const std::optional<at::Tensor>& h_init_,
     const at::Tensor& dout,
     const at::Tensor& dh_last,
-    const std::optional<at::Tensor>& length_
+    const std::optional<at::Tensor>& length_,
+    const std::optional<std::string>& padding_side_
 );

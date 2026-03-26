@@ -40,6 +40,7 @@ void set_base_params(
     const int seq_len,
     const int state_dim,
     const int num_channels,
+    const bool padding_right,
     const bool has_h_init,
     const int num_chunks,
     const at::Tensor u,
@@ -59,6 +60,7 @@ void set_base_params(
     params.seq_len = seq_len;
     params.state_dim = state_dim;
     params.num_channels = num_channels;
+    params.padding_right = padding_right;
     params.has_h_init = has_h_init;
     params.num_chunks = num_chunks;
 
@@ -103,6 +105,7 @@ void set_forward_params(
     const int seq_len,
     const int state_dim,
     const int num_channels,
+    const bool padding_right,
     const bool has_h_init,
     const int num_chunks,
     const at::Tensor u,
@@ -119,7 +122,7 @@ void set_forward_params(
 ) {
     set_base_params(
         params, 
-        batch_size, seq_len, state_dim, num_channels, 
+        batch_size, seq_len, state_dim, num_channels, padding_right,
         has_h_init, num_chunks,
         u, A, B, C, D_ptr,
         delta, delta_bias_ptr, h, h_init, length_ptr
@@ -137,6 +140,7 @@ void set_backward_params(
     const int seq_len,
     const int state_dim,
     const int num_channels,
+    const bool padding_right,
     const bool has_h_init,
     const int num_chunks,
     const at::Tensor u,
@@ -162,7 +166,7 @@ void set_backward_params(
 ) {
     set_base_params(
         params, 
-        batch_size, seq_len, state_dim, num_channels,
+        batch_size, seq_len, state_dim, num_channels, padding_right,
         has_h_init, num_chunks,
         u, A, B, C, D_ptr,
         delta, delta_bias_ptr, h, h_init, length_ptr
@@ -214,7 +218,8 @@ std::vector<at::Tensor> selective_scan_forward(
     const at::Tensor& delta,
     const at::Tensor& delta_bias,
     const std::optional<at::Tensor>& h_init_,
-    const std::optional<at::Tensor>& length_
+    const std::optional<at::Tensor>& length_,
+    const std::optional<std::string>& padding_side_
 ) {
     const bool has_h_init = h_init_.has_value();
     const bool has_length = length_.has_value();
@@ -240,6 +245,7 @@ std::vector<at::Tensor> selective_scan_forward(
     const int num_channels = sizes[1];
     const int seq_len = sizes[2];
     const int state_dim = A.size(1);
+    const bool padding_right = (padding_side_.value_or("right") == "right");
     const int num_chunks = kernel_config::get_num_chunks(seq_len);
 
     TORCH_CHECK(state_dim <= 256, "selective_scan only supports state_dim <= 256");
@@ -270,7 +276,7 @@ std::vector<at::Tensor> selective_scan_forward(
     ForwardSSParams params;
     set_forward_params(
         params,
-        batch_size, seq_len, state_dim, num_channels, 
+        batch_size, seq_len, state_dim, num_channels, padding_right,
         has_h_init, num_chunks,
         u, A, B, C, D.data_ptr(),
         delta, delta_bias.data_ptr(),
@@ -297,7 +303,8 @@ std::vector<at::Tensor> selective_scan_backward(
     const std::optional<at::Tensor>& h_init_,
     const at::Tensor& dout,
     const at::Tensor& dh_last,
-    const std::optional<at::Tensor>& length_
+    const std::optional<at::Tensor>& length_,
+    const std::optional<std::string>& padding_side_
 ) {
     const bool has_h_init = h_init_.has_value();
     const bool has_length = length_.has_value();
@@ -325,6 +332,7 @@ std::vector<at::Tensor> selective_scan_backward(
     const int num_channels = sizes[1];
     const int seq_len = sizes[2];
     const int state_dim = A.size(1);
+    const bool padding_right = (padding_side_.value_or("right") == "right");
     const int num_chunks = kernel_config::get_num_chunks(seq_len);
 
     TORCH_CHECK(state_dim <= 256, "selective_scan only supports state_dim <= 256");
@@ -354,7 +362,7 @@ std::vector<at::Tensor> selective_scan_backward(
     BackwardSSParams params;
     set_backward_params(
         params,
-        batch_size, seq_len, state_dim, num_channels, 
+        batch_size, seq_len, state_dim, num_channels, padding_right,
         has_h_init, num_chunks,
         u, A, B, C, D.data_ptr(),
         delta, delta_bias.data_ptr(), h, h_init,

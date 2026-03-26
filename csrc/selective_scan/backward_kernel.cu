@@ -11,7 +11,7 @@
 #include "common.h"
 #include "static_switch.h"
 
-template<bool kSeqDivisible_, int kMaxStateDim_>
+template<bool kSeqDivisible_, int kMaxStateDim_, bool kPaddingRight_>
 struct BackwardSSKernelTraits {
     static constexpr int kNumThreads = kernel_config::num_threads;
     static constexpr int kMinBlocks = (kNumThreads < 128) ? 5 : 3;
@@ -19,6 +19,7 @@ struct BackwardSSKernelTraits {
     static constexpr int kNumVectors = kNumElements / 4;
     static constexpr bool kSeqDivisible = kSeqDivisible_;
     static constexpr int kMaxStateDim = kMaxStateDim_;
+    static constexpr bool kPaddingRight = kPaddingRight_;
     static constexpr bool kEnableDirectVectorIO = kSeqDivisible && (kNumVectors == 1);
 
     using ScalarBlockLoad = cub::BlockLoad<
@@ -90,6 +91,7 @@ void backward_kernel(BackwardSSParams params) {
     constexpr int kNumThreads = Traits::kNumThreads;
     constexpr int kNumElements = Traits::kNumElements;
     constexpr int kMaxStateDim = Traits::kMaxStateDim;
+    constexpr bool kPaddingRight = Traits::kPaddingRight;
     constexpr int kChunkSize = kernel_config::chunk_size;
 
     extern __shared__ char smem_[];
@@ -294,17 +296,33 @@ void backward_kernel(BackwardSSParams params) {
                 #pragma unroll
                 for (int i = 0; i < kNumElements; i++) {
                     int token_idx = segment_start_idx + i;
-                    if (token_idx >= length) {
-                        h_vals[i] = make_float2(1.f, 0.f);
-                        dh_vals[i].y = 0.f;
+                    if constexpr (kPaddingRight) {
+                        if (token_idx >= length) {
+                            h_vals[i] = make_float2(1.f, 0.f);
+                            dh_vals[i].y = 0.f;
+                        }
+                        else {
+                            const float delta_a_exp = exp2f(delta_vals[i] * A_val * M_LOG2E);
+                            h_vals[i] = make_float2(
+                                delta_a_exp,
+                                delta_u_vals[i] * B_vals[i]
+                            );
+                            dh_vals[i].y = dout_vals[i] * C_vals[i];
+                        }
                     }
                     else {
-                        const float delta_a_exp = exp2f(delta_vals[i] * A_val * M_LOG2E);
-                        h_vals[i] = make_float2(
-                            delta_a_exp,
-                            delta_u_vals[i] * B_vals[i]
-                        );
-                        dh_vals[i].y = dout_vals[i] * C_vals[i];
+                        if (token_idx < params.seq_len - length || token_idx >= params.seq_len) {
+                            h_vals[i] = make_float2(1.f, 0.f);
+                            dh_vals[i].y = 0.f;
+                        }
+                        else {
+                            const float delta_a_exp = exp2f(delta_vals[i] * A_val * M_LOG2E);
+                            h_vals[i] = make_float2(
+                                delta_a_exp,
+                                delta_u_vals[i] * B_vals[i]
+                            );
+                            dh_vals[i].y = dout_vals[i] * C_vals[i];
+                        }
                     }
     
                     if (i == 0) {
@@ -438,21 +456,23 @@ void backward_kernel(BackwardSSParams params) {
 void backward_kernel_launch(BackwardSSParams& params, cudaStream_t stream) {
     BOOL_SWITCH(params.seq_len % kernel_config::chunk_size == 0, kSeqDivisible, [&]{
         DISPATCH_SWITCH(params.state_dim, MAX_STATE_DIM, [&]{
-            using Traits = BackwardSSKernelTraits<kSeqDivisible, MAX_STATE_DIM>;
-
-            constexpr int kSMemSizeInBytes = Traits::kSMemSizeInBytes 
-                + MAX_STATE_DIM * sizeof(float2)
-                + (kernel_config::num_threads + 3 * MAX_STATE_DIM) * sizeof(float);
-            
-            dim3 grid(params.batch_size, params.num_channels);
-            auto kernel = &backward_kernel<Traits>;
-            if (kSMemSizeInBytes >= 48 * 1024) {
-                C10_CUDA_CHECK(cudaFuncSetAttribute(
-                    kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSMemSizeInBytes
-                ));
-            }
-            kernel<<<grid, Traits::kNumThreads, kSMemSizeInBytes, stream>>>(params);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            BOOL_SWITCH(params.padding_right, kPaddingRight, [&]{
+                using Traits = BackwardSSKernelTraits<kSeqDivisible, MAX_STATE_DIM, kPaddingRight>;
+    
+                constexpr int kSMemSizeInBytes = Traits::kSMemSizeInBytes 
+                    + MAX_STATE_DIM * sizeof(float2)
+                    + (kernel_config::num_threads + 3 * MAX_STATE_DIM) * sizeof(float);
+                
+                dim3 grid(params.batch_size, params.num_channels);
+                auto kernel = &backward_kernel<Traits>;
+                if (kSMemSizeInBytes >= 48 * 1024) {
+                    C10_CUDA_CHECK(cudaFuncSetAttribute(
+                        kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSMemSizeInBytes
+                    ));
+                }
+                kernel<<<grid, Traits::kNumThreads, kSMemSizeInBytes, stream>>>(params);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
         });
     });
 }
