@@ -17,6 +17,7 @@ class SelectiveScanFn(torch.autograd.Function):
         delta_bias: torch.Tensor,
         h_init: torch.Tensor | None = None,
         length: torch.Tensor | None = None,
+        padding_size: str = "left"
     ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         Args:
@@ -45,14 +46,14 @@ class SelectiveScanFn(torch.autograd.Function):
             u, 
             A, B, C, D, 
             delta, delta_bias, 
-            h_init, length
+            h_init, length, padding_size
         )
 
         if any(ctx.needs_input_grad):
             ctx.save_for_backward(
                 u, 
                 A, B, C, D, delta, delta_bias, 
-                h, h_init, length
+                h, h_init, length, padding_size
             )
         
         return out, h[..., -1, 1::2]
@@ -65,13 +66,13 @@ class SelectiveScanFn(torch.autograd.Function):
         dout = ensure_contiguous(dout)
         dh_last = ensure_contiguous(dh_last)
 
-        u, A, B, C, D, delta, delta_bias, h, h_init, length = ctx.saved_tensors
+        u, A, B, C, D, delta, delta_bias, h, h_init, length, padding_side = ctx.saved_tensors
         du, dA, dB, dC, dD, ddelta, ddelta_bias, dh_init = selective_scan.backward(
             u, 
             A, B, C, D, 
             delta, delta_bias, 
             h, h_init, 
-            dout, dh_last, length
+            dout, dh_last, length, padding_side
         )
 
-        return du, dA, dB, dC, dD, ddelta, ddelta_bias, dh_init, None
+        return du, dA, dB, dC, dD, ddelta, ddelta_bias, dh_init, None, None
