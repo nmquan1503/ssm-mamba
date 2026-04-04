@@ -53,8 +53,9 @@ class SelectiveScanFn(torch.autograd.Function):
             ctx.save_for_backward(
                 u, 
                 A, B, C, D, delta, delta_bias, 
-                h, h_init, length, padding_size
+                h, h_init, length
             )
+            ctx.padding_size = padding_size
         
         return out, h[..., -1, 1::2]
 
@@ -66,7 +67,8 @@ class SelectiveScanFn(torch.autograd.Function):
         dout = ensure_contiguous(dout)
         dh_last = ensure_contiguous(dh_last)
 
-        u, A, B, C, D, delta, delta_bias, h, h_init, length, padding_side = ctx.saved_tensors
+        u, A, B, C, D, delta, delta_bias, h, h_init, length = ctx.saved_tensors
+        padding_side = ctx.padding_size
         du, dA, dB, dC, dD, ddelta, ddelta_bias, dh_init = selective_scan.backward(
             u, 
             A, B, C, D, 
